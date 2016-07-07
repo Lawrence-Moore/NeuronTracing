@@ -73,14 +73,14 @@ class Ui_CorrectionWindow(object):
         self.channelSelectMenu.addItem(_fromUtf8(""))
         self.channelSelectMenu.addItem(_fromUtf8(""))
         self.channelSelectMenu.addItem(_fromUtf8(""))
+        self.saveButton = QtGui.QPushButton(self.centralWidget)
+        self.saveButton.setGeometry(QtCore.QRect(842, 470, 101, 32))
+        self.saveButton.setObjectName(_fromUtf8("saveButton"))
         CorrectionWindow.setCentralWidget(self.centralWidget)
         self.menuBar = QtGui.QMenuBar(CorrectionWindow)
         self.menuBar.setGeometry(QtCore.QRect(0, 0, 949, 22))
         self.menuBar.setObjectName(_fromUtf8("menuBar"))
         CorrectionWindow.setMenuBar(self.menuBar)
-        self.statusBar = QtGui.QStatusBar(CorrectionWindow)
-        self.statusBar.setObjectName(_fromUtf8("statusBar"))
-        CorrectionWindow.setStatusBar(self.statusBar)
 
         self.retranslateUi(CorrectionWindow)
         QtCore.QMetaObject.connectSlotsByName(CorrectionWindow)
@@ -97,4 +97,5 @@ class Ui_CorrectionWindow(object):
         self.channelSelectMenu.setItemText(1, _translate("CorrectionWindow", "#1: Red", None))
         self.channelSelectMenu.setItemText(2, _translate("CorrectionWindow", "#2: Green", None))
         self.channelSelectMenu.setItemText(3, _translate("CorrectionWindow", "#3: Blue", None))
+        self.saveButton.setText(_translate("CorrectionWindow", "Save Image", None))
 

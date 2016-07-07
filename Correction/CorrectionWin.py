@@ -27,7 +27,7 @@ class Correction(QtGui.QMainWindow):
         # set the alignment square effectively to nil
         self.selectedRect = [0, 0, 0, 0]
         self.mouseHold = False  # whether mouse is currently pressed/held
-        self.ui.importButton.pressed.connect(self.importImage)
+        self.ui.importButton.released.connect(self.importImage)
         self.indexLayer = 0  # initial layer displayed is 0th index
         self.ui.layerSlider.setTickPosition(self.indexLayer)
         self.filename = ''  # effectively nil/false in value
@@ -49,7 +49,35 @@ class Correction(QtGui.QMainWindow):
         # self.unalignedImages = [[Original[z-Layers], Normal[z-Layers][colorLayers][QImages], Thresholded[z-Layers][colorLayers][QImages]]
         # self.alignedImages = [Normal[z-Layers][QImages], Thresholded[z-Layers][QImages]
         # self.unalignedData = [Normal[z-Layers][NumpyArrs], Thresholded[z-Layers][NumpyArrs]]
+        # self.alignedData = [Normal[z-Layers][NumpyArrs], Thresholded[z-Layers][NumpyArrs]]
         self.ui.channelSelectMenu.currentIndexChanged.connect(self.channelSelectionChanged)
+        self.ui.saveButton.released.connect(self.saveImage)
+        self.ui.saveButton.setVisible(False)
+
+    def saveImage(self):
+        # get the filename from the save dialog
+        dialog = QtGui.QFileDialog()
+        filename = str(dialog.getSaveFileName(filter=QtCore.QString('Images (*.tif *.png *.jpg)')))
+        if not filename:  # no filename was created
+            return
+        qimagemode = False  # whether the image will be a qimage or nparray
+        if self.ui.thresholdMode.isChecked():
+            thresh = 1
+        else:
+            thresh = 0
+        if self.alignMode:  # view is unaligned, get from self.unalignedData
+            channel = self.ui.channelSelectMenu.currentIndex()
+            if channel == 0:
+                img = self.unalignedData[thresh][self.indexLayer]
+            else:
+                qimagemode = True
+                img = self.unalignedImages[(thresh + 1)][self.indexLayer][channel]
+        else:  # view is aligned, get from self.alignedData
+            img = self.alignedData[thresh][self.indexLayer]
+        if qimagemode:  # save qimage to file with qimage module
+            img.save(filename)
+        else:  # save nparray to tif file with scipy module
+            save_image(img, filename)
 
     def splitChannels(self, arr):
         '''
@@ -85,6 +113,7 @@ class Correction(QtGui.QMainWindow):
             return
         if self.alignMode:  # ready to be aligned
             self.alignedImages = []
+            self.alignedData = []
             # x and y are intuitively switched in align_images()
             x = int(float(self.fullHeight) / (self.ui.afterView.height()) * self.selectedRect[1])
             y = int(float(self.fullWidth) / (self.ui.afterView.width()) * self.selectedRect[0])
@@ -93,6 +122,7 @@ class Correction(QtGui.QMainWindow):
             print x, y, width, colorlayer, self.indexLayer  # my args
             # make normal aligned images
             normalAligned = align_images(self.unalignedData[0], x, y, width, colorlayer, self.indexLayer)
+            self.alignedData.append(normalAligned)
             normalAImages = []
             for datum in normalAligned:
                 img = Image.fromarray(datum)
@@ -101,6 +131,7 @@ class Correction(QtGui.QMainWindow):
             self.alignedImages.append(normalAImages)
             # make thresholded aligned images
             thresholdedAligned = align_images(self.unalignedData[1], x, y, width, colorlayer, self.indexLayer)
+            self.alignedData.append(thresholdedAligned)
             threshAImages = []
             for datum in thresholdedAligned:
                 img = Image.fromarray(datum)
@@ -113,10 +144,12 @@ class Correction(QtGui.QMainWindow):
             self.drawAfterView()
             self.ui.alignButton.setText(QtCore.QString('Unalign'))
             self.alignMode = False
+            self.ui.channelSelectMenu.setVisible(False)
         else:  # already aligned, so redraw unaligned images
             self.alignedImages = []
             self.ui.alignButton.setText(QtCore.QString('Align'))
             self.alignMode = True
+            self.ui.channelSelectMenu.setVisible(True)
             self.drawAfterView()
 
     def layerChanged(self):
@@ -205,7 +238,7 @@ class Correction(QtGui.QMainWindow):
         pushed to beforeView and afterView respectively.
         '''
         dialog = QtGui.QFileDialog()
-        self.filename = str(dialog.getOpenFileName())
+        self.filename = str(dialog.getOpenFileName(filter=QtCore.QString('CZI File (*.czi)')))
         if not self.filename:  # user pressed cancel
             return
         self.ui.layerSlider.setTickPosition(0)  # initial layer displayed is 0th index
@@ -213,6 +246,7 @@ class Correction(QtGui.QMainWindow):
         self.unalignedData = []
         self.alignedImages = []
         self.unalignedImages = []
+        self.alignedData = []
         # convert czi file to numpy arrays
         originalData = read_czi_file(self.filename)
         # save dimensions of imported images as attributes for later
@@ -267,6 +301,7 @@ class Correction(QtGui.QMainWindow):
         self.drawAfterView()  # push to processed images afterView
         self.ui.afterLabel.setText(QtCore.QString('After Normalizing'))
         self.ui.channelSelectMenu.setVisible(True)  # past normalizing, so ready to align
+        self.ui.saveButton.setVisible(True)
 
     def eventFilter(self, source, event):
         '''
@@ -347,10 +382,15 @@ class Correction(QtGui.QMainWindow):
         y += 10
         self.ui.thresholdMode.move(x, y)
         # adjust align and channelselect buttons
-        x = width - .02 * width - self.ui.alignButton.width()
+        x = width * .98 - self.ui.alignButton.width()
         self.ui.alignButton.move(x, y)
         x -= 5 + self.ui.channelSelectMenu.width()
         self.ui.channelSelectMenu.move(x, y)
+        # adjust save button
+        x = width * .98 - self.ui.saveButton.width()
+        y = 2
+        self.ui.saveButton.move(x, y)
+        # redraw views to scale
         self.drawBeforeView()
         self.drawAfterView()
 
