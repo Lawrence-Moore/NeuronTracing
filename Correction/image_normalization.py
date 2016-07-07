@@ -108,10 +108,10 @@ def align_images(images, manual=False, template_top_left_x=0,
                                        template_color_layer=0,
                                        template_image_index=0):
     # align blue and green and then blue and red
-    if manual:
+    if manual is True:
         patch_indexes = (template_top_left_x, template_top_left_y)
-        patch = images[template_image_index][:, :, template_color_layer][template_top_left_y: template_top_left_y + template_width,
-                                                                         template_top_left_x: template_top_left_x + template_width]
+        patch = images[template_image_index][:, :, template_color_layer][template_top_left_x: template_top_left_x + template_width,
+                                                                         template_top_left_y: template_top_left_y + template_width]
         # shift over the necessary color indexes
         color_indexes = [0, 1, 2]
         color_indexes.remove(template_color_layer)
@@ -210,9 +210,11 @@ def shift_color_chanel(offset, images, color_chanel):
     images is a list of 3D numpy arrays representing the image
     color_chanel is the index of the color chanel being adjusted
     """
+    shifted_images = []
     for image in images:
         # shift the layer accordingly
-        layer = image[:, :, color_chanel]
+        shifted_image = image.copy()
+        layer = shifted_image[:, :, color_chanel]
 
         # lateral
         if offset[0] < 0:
@@ -230,7 +232,8 @@ def shift_color_chanel(offset, images, color_chanel):
             # shift left
             layer = np.pad(layer, ((0, 0), (0, abs(offset[1]))), mode='constant')[:, abs(offset[1]):]
 
-        image[:, :, color_chanel] = layer
+        shifted_image[:, :, color_chanel] = layer
+        shifted_images.append(shifted_image)
 
     # now shift vertically
     if offset[2] > 0:
@@ -250,7 +253,7 @@ def shift_color_chanel(offset, images, color_chanel):
         for i in range(abs(offset[2])):
             images[i][:, :, color_chanel] = np.zeros(images[i][:, :, color_chanel].shape)
 
-    return images
+    return shifted_images
 
 
 def evaluate_normalization_with_mask(old_images, adjusted_images, mask):

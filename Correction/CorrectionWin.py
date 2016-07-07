@@ -121,7 +121,7 @@ class Correction(QtGui.QMainWindow):
             colorlayer = self.ui.channelSelectMenu.currentIndex() - 1
             print x, y, width, colorlayer, self.indexLayer  # my args
             # make normal aligned images
-            normalAligned = align_images(self.unalignedData[0], x, y, width, colorlayer, self.indexLayer)
+            normalAligned = align_images(self.unalignedData[0], True, x, y, width, colorlayer, self.indexLayer)
             self.alignedData.append(normalAligned)
             normalAImages = []
             for datum in normalAligned:
@@ -130,7 +130,7 @@ class Correction(QtGui.QMainWindow):
                 normalAImages.append(img)
             self.alignedImages.append(normalAImages)
             # make thresholded aligned images
-            thresholdedAligned = align_images(self.unalignedData[1], x, y, width, colorlayer, self.indexLayer)
+            thresholdedAligned = align_images(self.unalignedData[1], True, x, y, width, colorlayer, self.indexLayer)
             self.alignedData.append(thresholdedAligned)
             threshAImages = []
             for datum in thresholdedAligned:
