@@ -325,6 +325,9 @@ class Correction(QtGui.QMainWindow):
         self.ui.channelSelectMenu.setVisible(True)  # past normalizing, so ready to align
         self.ui.saveButton.setVisible(True)
 
+    def array16ToQImage(self, arr):
+
+
     def eventFilter(self, source, event):
         '''
         :param source: widget that created the event
