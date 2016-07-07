@@ -153,21 +153,24 @@ def get_bright_patch(image, width):
     Given a 3D image numpy array, the width of the patch, and color index corresponding to the index of the color layer,
     find a region with the highest standard deviation to use for template matching
     '''
-    highest_std = 0
+    highest_minimum_std = 0
     coordinates = [0, 0]
     best_color = 0
 
-    for color in [0, 1, 2]:
-        layer = image[:, :, color]
+    layer = image[:, :, 0]
+    # iterate through, finding the region with the highest standard devation
+    for i in range(image.shape[0] / 4, 3 * image.shape[0] / 4)[::width]:
+        for j in range(image.shape[1] / 4, 3 * image.shape[1] / 4)[::width]:
+            stds = []
+            # go through each color layer and calculate the std
+            for color in [0, 1, 2]:
+                layer = image[:, :, color]
+                stds.append(np.std(layer[i: i + width, j: j + width]))
 
-        # iterate through, finding the region with the highest standard devation
-        for i in range(layer.shape[0] / 4, 3 * layer.shape[0] / 4)[::width]:
-            for j in range(layer.shape[1] / 4, 3 * layer.shape[1] / 4)[::width]:
-                std = np.std(layer[i: i + width, j: j + width])
-                if std > highest_std:
-                    highest_std = std
-                    coordinates = [i, j]
-                    best_color = color
+            if np.min(stds) > highest_minimum_std:
+                highest_minimum_std = np.min(stds)
+                coordinates = [i, j]
+                best_color = np.argmin(stds)
 
     # get the patch
     patch = image[:, :, best_color][coordinates[0]: coordinates[0] + width, coordinates[1]: coordinates[1] + width]
