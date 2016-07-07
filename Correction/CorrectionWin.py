@@ -4,7 +4,6 @@ from correction import Ui_CorrectionWindow
 from image_normalization import *
 from PIL import Image, ImageQt
 import numpy as np
-import time
 
 # Docstring Format:
 # Param ArgName: (ArgType:) Description
@@ -241,7 +240,8 @@ class Correction(QtGui.QMainWindow):
         self.filename = str(dialog.getOpenFileName(filter=QtCore.QString('CZI File (*.czi)')))
         if not self.filename:  # user pressed cancel
             return
-        self.ui.layerSlider.setTickPosition(0)  # initial layer displayed is 0th index
+        # initial layer displayed is 0th index
+        self.ui.layerSlider.setTickPosition(0)
         self.indexLayer = 0
         self.unalignedData = []
         self.alignedImages = []
@@ -249,6 +249,17 @@ class Correction(QtGui.QMainWindow):
         self.alignedData = []
         # convert czi file to numpy arrays
         originalData = read_czi_file(self.filename)
+        # initiate a progress bar
+        bar = QtGui.QProgressBar()
+        bar.setWindowTitle(QtCore.QString('Importing Image...'))
+        bar.setWindowModality(QtCore.Qt.WindowModal)
+        bar.resize((self.ui.beforeView.width()), (self.ui.beforeView.width() / 20))
+        bar.move(self.ui.beforeView.width(), self.ui.beforeView.width())
+        bar.setMinimum(0)
+        currentProgress = 0
+        bar.setMaximum((len(originalData) * 12))
+        bar.show()
+        QtGui.QApplication.processEvents()
         # save dimensions of imported images as attributes for later
         self.fullHeight, self.fullWidth = originalData[0].shape[0], originalData[0].shape[1]
         # set number of layers in image to slide through with slider widget
@@ -261,6 +272,10 @@ class Correction(QtGui.QMainWindow):
             img = Image.fromarray(data)
             img = ImageQt.ImageQt(img)
             originalLayers.append(img)
+            # update progress bar
+            currentProgress += 4
+            bar.setValue(currentProgress)
+            QtGui.QApplication.processEvents()
         self.unalignedImages.append(originalLayers)
         self.drawBeforeView()  # push the original image to beforeView
         # normalize original images without threshold and save as attribute
@@ -278,7 +293,11 @@ class Correction(QtGui.QMainWindow):
                 img = Image.fromarray(datum)
                 img = ImageQt.ImageQt(img)
                 colorImages.append(img)
+                currentProgress += 1
+                bar.setValue(currentProgress)
+                QtGui.QApplication.processEvents()
             normalizedImages.append(colorImages)
+            # update progress bar
         self.unalignedImages.append(normalizedImages)
         # normalize original images with threshold and save as attribute
         thresholdedData = normalize_colors(originalData, True)
@@ -296,6 +315,9 @@ class Correction(QtGui.QMainWindow):
                 img = ImageQt.ImageQt(img)
                 colorImages.append(img)
             thresholdedImages.append(colorImages)
+            currentProgress += 4
+            bar.setValue(currentProgress)
+            QtGui.QApplication.processEvents()
         self.unalignedImages.append(thresholdedImages)
         self.alignMode = True  # afterView is ready to draw rects with mouse
         self.drawAfterView()  # push to processed images afterView
@@ -345,18 +367,10 @@ class Correction(QtGui.QMainWindow):
     def resizeEvent(self, event):
         '''
         :param event: the user changed the size of the main window
-        :return: none: remakes the layout of widget in the main window
-        '''
-        width, height = event.size().width(), event.size().height()
-        self.remakeLayout(width, height)
-
-    def remakeLayout(self, width, height):
-        '''
-        :param width: int: width of main window
-        :param height: int: height of main window
         :return: sets the position and size of all widgets based on the
         mainwindow's width and height.
         '''
+        width, height = event.size().width(), event.size().height()
         y = .15 * height
         x = .02 * width  # margins from side of window
         side = height - 1.4 * y  # side length of views
@@ -395,11 +409,9 @@ class Correction(QtGui.QMainWindow):
         self.drawAfterView()
 
 if __name__ == '__main__':
-    '''
-    Executes the application and creates an instance of the Correction class.
-    '''
+    # Executes the application and creates an instance of the Correction class.
     app = QtGui.QApplication(sys.argv)
-    ex = Correction()  # this is customized
+    ex = Correction()
     ex.show()
     sys.exit(app.exec_())
 
