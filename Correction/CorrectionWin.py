@@ -124,18 +124,14 @@ class Correction(QtGui.QMainWindow):
             self.alignedData.append(normalAligned)
             normalAImages = []
             for datum in normalAligned:
-                img = Image.fromarray(datum)
-                img = ImageQt.ImageQt(img)
-                normalAImages.append(img)
+                normalAImages.append(self.array16ToQImage(datum))
             self.alignedImages.append(normalAImages)
             # make thresholded aligned images
             thresholdedAligned = align_images(self.unalignedData[1], True, x, y, width, colorlayer, self.indexLayer)
             self.alignedData.append(thresholdedAligned)
             threshAImages = []
             for datum in thresholdedAligned:
-                img = Image.fromarray(datum)
-                img = ImageQt.ImageQt(img)
-                threshAImages.append(img)
+                threshAImages.append(self.array16ToQImage(datum))
             self.alignedImages.append(threshAImages)
             # push to views and labels
             self.ui.afterLabel.setText(QtCore.QString('After Normalizing and Aligning'))
@@ -150,6 +146,13 @@ class Correction(QtGui.QMainWindow):
             self.alignMode = True
             self.ui.channelSelectMenu.setVisible(True)
             self.drawAfterView()
+
+    def array16ToQImage(self, datum):
+        datum = datum / 256
+        datum = datum.astype(np.uint8)
+        img = Image.fromarray(datum)
+        img = ImageQt.ImageQt(img)
+        return img
 
     def layerChanged(self):
         '''
@@ -324,9 +327,6 @@ class Correction(QtGui.QMainWindow):
         self.ui.afterLabel.setText(QtCore.QString('After Normalizing'))
         self.ui.channelSelectMenu.setVisible(True)  # past normalizing, so ready to align
         self.ui.saveButton.setVisible(True)
-
-    def array16ToQImage(self, arr):
-
 
     def eventFilter(self, source, event):
         '''
