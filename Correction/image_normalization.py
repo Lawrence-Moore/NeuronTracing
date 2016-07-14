@@ -9,18 +9,37 @@ from sklearn.metrics import pairwise_distances_argmin
 from sklearn.utils import shuffle
 
 
-def normalize_colors(images, threshold=False):
+def normalize_with_min_max(images, threshold_min, threshold_max):
+    return normalize_colors(images, thresholded_min_max=True, threshold_min=threshold_min, threshold_max=threshold_max)
+
+
+def normalize_with_standard_deviation(images, std_multiple):
+    return normalize_colors(images, threshold_std=True, std_multiple=std_multiple)
+
+
+def normalize_generic(images):
+    return normalize_colors(images)
+
+
+def normalize_colors(images, thresholded_min_max=False, threshold_std=False, threshold_min=0, threshold_max=0, std_multiple=0):
     """
     Normalize the colors by standarding the mean and standard deviation throughout each layer
     Takes in a list of 3D numpy arrays representing the images. Returns a list of the same format with the images normalized
     """
     # find the overal mean and standard deviation
-    if threshold:
+    if thresholded_min_max or threshold_std:
         # go through and threhold the images
         layer_means = []
         layer_stds = []
         for image in images:
-            thresholded_image = image[threshold_with_minimum(image)]
+            # get the mask
+            if thresholded_min_max:
+                mask = threshold_with_min_max(image, threshold_min, threshold_max)
+            else:
+                mask = threshold_with_standard_deviation(image, std_multiple)
+
+            # apply the mask to image and get the stats
+            thresholded_image = image[mask]
             layer_means.append(np.mean(thresholded_image))
             layer_stds.append(np.std(thresholded_image))
         # calculate the mean and stds of the thresholded layers by averaging both across the entire set of images
@@ -38,8 +57,12 @@ def normalize_colors(images, threshold=False):
         for layer_index in [0, 1, 2]:
             layer = image[:, :, layer_index]
 
-            if threshold:
-                mask = threshold_with_minimum(layer)
+            if thresholded_min_max or threshold_std:
+                if thresholded_min_max:
+                    mask = threshold_with_min_max(layer, threshold_min, threshold_max)
+                else:
+                    mask = threshold_with_standard_deviation(layer, std_multiple)
+
                 layer[mask] = (((layer[mask] - np.mean(layer[mask])) / np.std(layer[mask])) * std) + mean
                 layers.append(layer)
             else:
@@ -59,22 +82,22 @@ def normalize_colors(images, threshold=False):
     return normalized_images
 
 
-def threshold_with_mean_and_std(image):
+def threshold_with_standard_deviation(layer, std_multiple):
     '''
-    Takes in a numpy array of an image and returns a mask.
+    Takes in a numpy array of an layer and returns a mask.
     The mask is true when the pixel values are within 3 standard deviations of the mean
     '''
-    mean = np.mean(image)
-    std = np.std(image)
-    return np.logical_and(mean - 3 * std < image, image < mean + 3 * std)
+    mean = np.mean(layer)
+    std = np.std(layer)
+    return np.logical_and(mean < layer, layer < mean + std_multiple * std)
 
 
-def threshold_with_minimum(image, minimum=50):
+def threshold_with_min_max(image, threshold_min, threshold_max):
     '''
     Takes in a numpy array of an image and returns a mask.
     The mask is true where the pixel values exceed the minimum
     '''
-    return image > minimum
+    return np.logical_and(threshold_min < image, image < threshold_max)
 
 
 def generate_mip(images):
@@ -117,7 +140,9 @@ def align_images(images, manual=False, template_top_left_x=0,
         color_indexes.remove(template_color_layer)
 
         aligned_images = adjust_color_layer(images, color_indexes[0], patch_indexes, patch, template_image_index, template_width)
-        return adjust_color_layer(aligned_images, color_indexes[1], patch_indexes, patch, template_image_index, template_width)
+        aligned_images = adjust_color_layer(aligned_images, color_indexes[1], patch_indexes, patch, template_image_index, template_width)
+        visualize_alignment(images, aligned_images, patch_indexes, template_image_index, template_width)
+        return aligned_images
     else:
         # choose an image from them iddle
         image_index = len(images) / 2
@@ -131,7 +156,10 @@ def align_images(images, manual=False, template_top_left_x=0,
         color_indexes.remove(best_color)
 
         aligned_images = adjust_color_layer(images, color_indexes[0], patch_indexes, patch, image_index, width)
-        return adjust_color_layer(aligned_images, color_indexes[1], patch_indexes, patch, image_index, width)
+        aligned_images = adjust_color_layer(aligned_images, color_indexes[1], patch_indexes, patch, image_index, width)
+        visualize_alignment(images, aligned_images, patch_indexes, image_index, width)
+
+        return aligned_images
 
 
 def adjust_color_layer(images, color_index, patch_indexes, patch, image_index, width):
@@ -254,6 +282,15 @@ def shift_color_chanel(offset, images, color_chanel):
             images[i][:, :, color_chanel] = np.zeros(images[i][:, :, color_chanel].shape)
 
     return shifted_images
+
+
+def visualize_alignment(images, aligned_images, patch_indexes, image_index, width):
+    '''
+    Compare the patch before and after in the images
+    '''
+    old_patch = images[image_index][patch_indexes[0]: patch_indexes[0] + width, patch_indexes[1]: patch_indexes[1] + width, :]
+    new_patch = aligned_images[image_index][patch_indexes[0]: patch_indexes[0] + width, patch_indexes[1]: patch_indexes[1] + width, :]
+    return old_patch, new_patch
 
 
 def evaluate_normalization_with_mask(old_images, adjusted_images, mask):
@@ -380,7 +417,17 @@ def read_tiff_image(file_name):
     return np.array(Image.open(file_name))
 
 
+def separate_colors(image, colors, image_name):
+    '''
+    Given an image (3D numpy array) and list of 3 element arrays representing colors, split it up into several different colors
+    '''
+    for index, color in enumerate(colors):
+        img = image.copy()
+        img[img != color] = 0
+        save_image(img, image_name + " color " + str(index) + ".jpg")
+
+
 def normalize_and_align():
-    images = read_czi_file("880 BI/TBX DIO TRE-XFP ScalesSQ 20x 1.0Wtile stack_Subset_Stitch.czi")
-    images = read_czi_file("880 BI/OB stack sparse low dose TBX 10x 70um.czi")
+    images = read_czi_file("../../880 BI/TBX DIO TRE-XFP ScalesSQ 20x 1.0Wtile stack_Subset_Stitch.czi")
+    images = read_czi_file("../../880 BI/OB stack sparse low dose TBX 10x 70um.czi")
     return images

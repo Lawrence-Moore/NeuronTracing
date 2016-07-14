@@ -124,6 +124,7 @@ class Correction(QtGui.QMainWindow):
             self.alignedData.append(normalAligned)
             normalAImages = []
             for datum in normalAligned:
+                print type(normalAligned), len(normalAligned), type(datum)
                 img = Image.fromarray(datum)
                 img = ImageQt.ImageQt(img)
                 normalAImages.append(img)
