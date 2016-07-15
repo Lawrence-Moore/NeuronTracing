@@ -19,7 +19,6 @@ def normalize_with_standard_deviation(images, std_multiple):
 
 
 def normalize_generic(images):
-    return images
     return normalize_colors(images)
 
 
