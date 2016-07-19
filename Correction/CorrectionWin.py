@@ -59,6 +59,7 @@ class Correction(QtGui.QMainWindow):
         self.ui.saveButton.setVisible(False)
         self.ui.saveMIPButton.released.connect(self.saveMIP)
         self.ui.saveMIPButton.setVisible(False)
+        self.ui.thresholdMode.setVisible(False)
 
     def saveImage(self):
         # get the filename from the save dialog
@@ -160,11 +161,11 @@ class Correction(QtGui.QMainWindow):
         if self.alignMode:  # ready to be aligned
             # initiate a progress bar
             bar = QtGui.QProgressBar()
-            bar.setWindowTitle(QtCore.QString('Aligning Images without Threshold'))
+            bar.setWindowTitle(QtCore.QString('Aligning Images'))
             bar.setWindowModality(QtCore.Qt.WindowModal)
             bar.resize((self.ui.beforeView.width()), (self.ui.beforeView.width() / 20))
             bar.move(self.ui.beforeView.width(), self.ui.beforeView.width())
-            bar.setMaximum(4)
+            bar.setMaximum(2)
             bar.show()
             QtGui.QApplication.processEvents()
             # finish initiating progress bar
@@ -179,14 +180,14 @@ class Correction(QtGui.QMainWindow):
             # make normal aligned images
             normalAligned = align_images(self.unalignedData[0], True, x, y, width, colorlayer, self.indexLayer)
             self.alignedData.append(normalAligned)
-            bar.setWindowTitle(QtCore.QString('Caching Aligned Images without Threshold'))
+            bar.setWindowTitle(QtCore.QString('Caching Aligned Images'))
             bar.setValue(1)
             QtGui.QApplication.processEvents()
             normalAImages = []
             for datum in normalAligned:
                 normalAImages.append(self.array16ToQImage(datum))
             self.alignedImages.append(normalAImages)
-            bar.setWindowTitle(QtCore.QString('Aligning Images with Threshold'))
+            '''bar.setWindowTitle(QtCore.QString('Aligning Images with Threshold'))
             bar.setValue(2)
             QtGui.QApplication.processEvents()
             # make thresholded aligned images
@@ -198,8 +199,10 @@ class Correction(QtGui.QMainWindow):
             threshAImages = []
             for datum in thresholdedAligned:
                 threshAImages.append(self.array16ToQImage(datum))
-            self.alignedImages.append(threshAImages)
+            self.alignedImages.append(threshAImages)'''
             # push to views and labels
+            self.ui.thresholdMode.setChecked(False)
+            self.ui.thresholdMode.setVisible(False)
             self.ui.afterLabel.setText(QtCore.QString('After Normalizing and Aligning'))
             self.ui.alignButton.setText(QtCore.QString('Unalign'))
             self.alignMode = False
@@ -246,7 +249,10 @@ class Correction(QtGui.QMainWindow):
             return
         # create scene from original image
         width, height = self.ui.beforeView.width(), self.ui.beforeView.height()
-        img = self.unalignedImages[0][self.indexLayer].scaled(width, height)
+        try:
+            img = self.unalignedImages[0][self.indexLayer].scaled(width, height)
+        except:
+            print self.indexLayer, width, height, len(self.unalignedImages)
         pixmap = QtGui.QPixmap.fromImage(img)
         pixitem = QtGui.QGraphicsPixmapItem(pixmap)
         scene = QtGui.QGraphicsScene()
@@ -306,12 +312,12 @@ class Correction(QtGui.QMainWindow):
         pushed to beforeView and afterView respectively.
         '''
         dialog = QtGui.QFileDialog()
-        self.filename = str(dialog.getOpenFileName(filter=QtCore.QString('CZI File (*.czi)')))
-        if not self.filename:  # user pressed cancel
+        filename = str(dialog.getOpenFileName(filter=QtCore.QString('CZI File (*.czi)')))
+        if not filename:  # user pressed cancel
             return
+        self.filename = filename
         # initial layer displayed is 0th index
-        self.ui.layerSlider.setTickPosition(0)
-        self.indexLayer = 0
+        self.indexLayer = 0  # initial layer displayed is 0th index
         self.unalignedData = []
         self.alignedImages = []
         self.unalignedImages = []
@@ -330,8 +336,6 @@ class Correction(QtGui.QMainWindow):
         QtGui.QApplication.processEvents()
         # save dimensions of imported images as attributes for later
         self.fullHeight, self.fullWidth = originalData[0].shape[0], originalData[0].shape[1]
-        # set number of layers in image to slide through with slider widget
-        self.ui.layerSlider.setMaximum((len(originalData) - 1))
         # convert numpy arrays to QImages and save as attribute
         originalLayers = []
         bar.setWindowTitle(QtCore.QString('Importing File...Caching Original Data'))
@@ -404,6 +408,10 @@ class Correction(QtGui.QMainWindow):
         self.ui.saveButton.setVisible(True)
         self.ui.saveStackButton.setVisible(True)
         self.ui.saveMIPButton.setVisible(True)
+        self.ui.thresholdMode.setVisible(True)
+        # set number of layers in image to slide through with slider widget
+        self.ui.layerSlider.setMaximum((len(originalData) - 1))
+        self.ui.layerSlider.setTickPosition(0)
 
     def eventFilter(self, source, event):
         '''
