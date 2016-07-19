@@ -5,6 +5,7 @@ from image_normalization import *
 from PIL import Image, ImageQt
 import numpy as np
 import os
+import tifffile
 
 # Docstring Format:
 # Param ArgName: (ArgType:) Description
@@ -82,7 +83,7 @@ class Correction(QtGui.QMainWindow):
         if qimagemode:  # save qimage to file with qimage module
             img.save(filename)
         else:  # save nparray to tif file with scipy module
-            save_image(img, filename)
+            tifffile.imsave(filename, img)
 
     def saveStack(self):
         dialog = QtGui.QFileDialog()
@@ -99,14 +100,14 @@ class Correction(QtGui.QMainWindow):
             thresh = 0
             threshName = 'noThreshold'
         if self.alignMode:  # view is unaligned, get from self.unalignedImages
-            for i, zLayer in enumerate(self.unalignedImages[(thresh + 1)]):
+            for i, zLayer in enumerate(self.unalignedData[thresh]):
                 filename = savedirectory + ('/unaligned_%s_layer%d.tif' % (threshName, i))
-                img = zLayer[0]
-                img.save(filename)
+                zLayerImg = zLayer[0]
+                tifffile.imsave(filename, zLayerImg)
         else:  # view is aligned, get from self.alignedImages
-            for i, zLayerImg in enumerate(self.alignedImages[thresh]):
+            for i, zLayerImg in enumerate(self.alignedData[thresh]):
                 filename = savedirectory + ('/aligned_%s_layer%d.tif' % (threshName, i))
-                zLayerImg.save(filename)
+                tifffile.imsave(filename, zLayerImg)
 
     def saveMIP(self):
         dialog = QtGui.QFileDialog()
