@@ -225,6 +225,7 @@ def match_patch(images, patch_index, patch, width, image_index, color_index, wig
     final_z_offset = 0
 
     # go through and find the greatest similarity in the layers
+    # check for the range
     for z_offset in range(-20, 20):
         image = images[image_index + z_offset]
 
