@@ -351,7 +351,7 @@ class Correction(QtGui.QMainWindow):
         bar.setWindowTitle(QtCore.QString('Importing File...Normalizing Original Data'))
         QtGui.QApplication.processEvents()
         # normalize original images without threshold and save as attribute
-        normalizedData = normalize_colors(originalData)
+        normalizedData = normalize_generic(originalData)
         self.unalignedData.append(normalizedData)
         bar.setWindowTitle(QtCore.QString('Importing File...Caching Normalized Data (w/RGB splitting)'))
         QtGui.QApplication.processEvents()
@@ -376,7 +376,7 @@ class Correction(QtGui.QMainWindow):
         # normalize original images with threshold and save as attribute
         bar.setWindowTitle(QtCore.QString('Importing File...Normalizing Original Data with Threshold'))
         QtGui.QApplication.processEvents()
-        thresholdedData = normalize_colors(originalData, True)
+        thresholdedData = normalize_generic(originalData)
         self.unalignedData.append(thresholdedData)
         bar.setWindowTitle(QtCore.QString('Importing File...Caching Normalized Data with Threshold (w/RGB splitting)'))
         QtGui.QApplication.processEvents()

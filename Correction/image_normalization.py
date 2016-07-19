@@ -7,20 +7,40 @@ from skimage.feature import match_template
 from sklearn.cluster import KMeans
 from sklearn.metrics import pairwise_distances_argmin
 from sklearn.utils import shuffle
+from skimage.measure import structural_similarity as ssim
 
 
-def normalize_colors(images, threshold=False):
+def normalize_with_min_max(images, threshold_min, threshold_max):
+    return normalize_colors(images, thresholded_min_max=True, threshold_min=threshold_min, threshold_max=threshold_max)
+
+
+def normalize_with_standard_deviation(images, std_multiple):
+    return normalize_colors(images, threshold_std=True, std_multiple=std_multiple)
+
+
+def normalize_generic(images):
+    return normalize_colors(images)
+
+
+def normalize_colors(images, thresholded_min_max=False, threshold_std=False, threshold_min=0, threshold_max=0, std_multiple=0):
     """
     Normalize the colors by standarding the mean and standard deviation throughout each layer
     Takes in a list of 3D numpy arrays representing the images. Returns a list of the same format with the images normalized
     """
     # find the overal mean and standard deviation
-    if threshold:
+    if thresholded_min_max or threshold_std:
         # go through and threhold the images
         layer_means = []
         layer_stds = []
         for image in images:
-            thresholded_image = image[threshold_with_minimum(image)]
+            # get the mask
+            if thresholded_min_max:
+                mask = threshold_with_min_max(image, threshold_min, threshold_max)
+            else:
+                mask = threshold_with_standard_deviation(image, std_multiple)
+
+            # apply the mask to image and get the stats
+            thresholded_image = image[mask]
             layer_means.append(np.mean(thresholded_image))
             layer_stds.append(np.std(thresholded_image))
         # calculate the mean and stds of the thresholded layers by averaging both across the entire set of images
@@ -38,8 +58,12 @@ def normalize_colors(images, threshold=False):
         for layer_index in [0, 1, 2]:
             layer = image[:, :, layer_index]
 
-            if threshold:
-                mask = threshold_with_minimum(layer)
+            if thresholded_min_max or threshold_std:
+                if thresholded_min_max:
+                    mask = threshold_with_min_max(layer, threshold_min, threshold_max)
+                else:
+                    mask = threshold_with_standard_deviation(layer, std_multiple)
+
                 layer[mask] = (((layer[mask] - np.mean(layer[mask])) / np.std(layer[mask])) * std) + mean
                 layers.append(layer)
             else:
@@ -59,22 +83,22 @@ def normalize_colors(images, threshold=False):
     return normalized_images
 
 
-def threshold_with_mean_and_std(image):
+def threshold_with_standard_deviation(layer, std_multiple):
     '''
-    Takes in a numpy array of an image and returns a mask.
+    Takes in a numpy array of an layer and returns a mask.
     The mask is true when the pixel values are within 3 standard deviations of the mean
     '''
-    mean = np.mean(image)
-    std = np.std(image)
-    return np.logical_and(mean - 3 * std < image, image < mean + 3 * std)
+    mean = np.mean(layer)
+    std = np.std(layer)
+    return np.logical_and(mean < layer, layer < mean + std_multiple * std)
 
 
-def threshold_with_minimum(image, minimum=50):
+def threshold_with_min_max(image, threshold_min, threshold_max):
     '''
     Takes in a numpy array of an image and returns a mask.
     The mask is true where the pixel values exceed the minimum
     '''
-    return image > minimum
+    return np.logical_and(threshold_min < image, image < threshold_max)
 
 
 def generate_mip(images):
@@ -116,8 +140,10 @@ def align_images(images, manual=False, template_top_left_x=0,
         color_indexes = [0, 1, 2]
         color_indexes.remove(template_color_layer)
 
-        aligned_images = adjust_color_layer(images, color_indexes[0], patch_indexes, patch, template_image_index, template_width)
-        return adjust_color_layer(aligned_images, color_indexes[1], patch_indexes, patch, template_image_index, template_width)
+        aligned_images, offsets1 = adjust_color_layer(images, color_indexes[0], patch_indexes, patch, template_image_index, template_width)
+        aligned_images, offsets2 = adjust_color_layer(aligned_images, color_indexes[1], patch_indexes, patch, template_image_index, template_width)
+        visualize_alignment(images, aligned_images, patch_indexes, template_image_index, template_width, color_indexes, offsets1, offsets2)
+        return aligned_images
     else:
         # choose an image from them iddle
         image_index = len(images) / 2
@@ -130,8 +156,11 @@ def align_images(images, manual=False, template_top_left_x=0,
         color_indexes = [0, 1, 2]
         color_indexes.remove(best_color)
 
-        aligned_images = adjust_color_layer(images, color_indexes[0], patch_indexes, patch, image_index, width)
-        return adjust_color_layer(aligned_images, color_indexes[1], patch_indexes, patch, image_index, width)
+        aligned_images, offsets1 = adjust_color_layer(images, color_indexes[0], patch_indexes, patch, image_index, width)
+        aligned_images, offsets2 = adjust_color_layer(aligned_images, color_indexes[1], patch_indexes, patch, image_index, width)
+        visualize_alignment(images, aligned_images, patch_indexes, image_index, width, color_indexes, offsets1, offsets2)
+
+        return aligned_images
 
 
 def adjust_color_layer(images, color_index, patch_indexes, patch, image_index, width):
@@ -141,11 +170,23 @@ def adjust_color_layer(images, color_index, patch_indexes, patch, image_index, w
     '''
 
     # find that patch in blue and compare coordinates
-    xy_offset, final_z_offset = match_patch(images, patch_indexes, patch, width, image_index, color_index)
-    print xy_offset, final_z_offset
+    offsets, best_patch = match_patch(images, patch_indexes, patch, width, image_index, color_index)
+    # print "one way", offsets
+    # offsets, best_patch = alternative_patch_matching(images, patch_indexes, patch, width, image_index, color_index)
+    # print "another", offsets
+
+    # visualize the match
+    print patch.shape, best_patch.shape
+    fig = plt.figure()
+    ax = fig.add_subplot(1, 2, 1)
+    plt.imshow((patch.astype(np.float16) / (2 ** 16-1) * (2 ** 8-1)).astype(np.uint8))
+    ax.set_title('original patch')
+    ax = fig.add_subplot(1, 2, 2)
+    plt.imshow((best_patch.astype(np.float16) / (2 ** 16 - 1) * (2 ** 8 - 1)).astype(np.uint8))
+    ax.set_title('matched patch')
 
     # shift the layer according to the offset
-    return shift_color_chanel((xy_offset[0], xy_offset[1], final_z_offset), images, color_index)
+    return shift_color_chanel(offsets, images, color_index), offsets
 
 
 def get_bright_patch(image, width):
@@ -184,7 +225,7 @@ def match_patch(images, patch_index, patch, width, image_index, color_index, wig
     final_z_offset = 0
 
     # go through and find the greatest similarity in the layers
-    for z_offset in range(5):
+    for z_offset in range(-20, 20):
         image = images[image_index + z_offset]
 
         # get the region to check. It should be the size of the patch plus some wiggle room around the edges
@@ -199,7 +240,38 @@ def match_patch(images, patch_index, patch, width, image_index, color_index, wig
             final_z_offset = z_offset
 
     xy = np.unravel_index(np.argmax(result), result.shape)
-    return np.array(xy) - wiggle_room, final_z_offset
+
+    # adjust the coordinates
+    xy_offset = np.array(xy) - wiggle_room
+    best_patch = images[image_index + final_z_offset][patch_index[0] + xy_offset[0]: patch_index[0] + xy_offset[0] + width,
+                                                      patch_index[1] + xy_offset[1]: patch_index[1] + xy_offset[1] + width, color_index]
+
+    return (xy_offset[0], xy_offset[1], final_z_offset), best_patch
+
+
+def alternative_patch_matching(images, patch_index, patch, width, image_index, color_index, wiggle_room=5):
+    '''
+    Uses image comparsion instead of fuzzy matching
+    '''
+    best_result = 0
+    final_z_offset = 0   
+    for z_offset in range(-20, 20):
+        image = images[image_index + z_offset]
+        # iterate through squares and check if the images are similar
+        for i in range(patch_index[0] - wiggle_room, patch_index[0] + wiggle_room):
+            for j in range(patch_index[1] - wiggle_room, patch_index[1] + wiggle_room):
+                comparison_area = image[i: i + width, j: j + width, color_index]
+                comparison_score = ssim(patch, comparison_area)
+                if comparison_score > best_result:
+                    best_result = comparison_score
+                    final_z_offset = z_offset
+                    best_xy = [i, j]
+
+    xy_offset = np.array(best_xy) - patch_index
+    best_patch = images[image_index + final_z_offset][patch_index[0] + xy_offset[0]: patch_index[0] + xy_offset[0] + width,
+                                                      patch_index[1] + xy_offset[1]: patch_index[1] + xy_offset[1] + width, color_index]
+
+    return (xy_offset[0], xy_offset[1], final_z_offset), best_patch
 
 
 def shift_color_chanel(offset, images, color_chanel):
@@ -238,22 +310,46 @@ def shift_color_chanel(offset, images, color_chanel):
     # now shift vertically
     if offset[2] > 0:
         # shift the z layer of the chanel up
-        for i in range(len(images) - abs(offset[2])):
-            images[i][:, :, color_chanel] = images[i + abs(offset[2])][:, :, color_chanel]
+        for i in range(len(shifted_images) - abs(offset[2])):
+            shifted_images[i][:, :, color_chanel] = shifted_images[i + abs(offset[2])][:, :, color_chanel]
 
         # fill in the rest with zeros
-        for i in range(len(images) - abs(offset[2]), len(images)):
-            images[i][:, :, color_chanel] = np.zeros(images[i][:, :, color_chanel].shape)
+        for i in range(len(shifted_images) - abs(offset[2]), len(shifted_images)):
+            shifted_images[i][:, :, color_chanel] = np.zeros(shifted_images[i][:, :, color_chanel].shape)
 
     elif offset[2] < 0:
         # shift the z layer of the chanel down
-        for i in reversed(range(abs(offset[2]), len(images))):
-            images[i][:, :, color_chanel] = images[i - abs(offset[2])][:, :, color_chanel]
+        for i in reversed(range(abs(offset[2]), len(shifted_images))):
+            shifted_images[i][:, :, color_chanel] = shifted_images[i - abs(offset[2])][:, :, color_chanel]
 
         for i in range(abs(offset[2])):
-            images[i][:, :, color_chanel] = np.zeros(images[i][:, :, color_chanel].shape)
+            shifted_images[i][:, :, color_chanel] = np.zeros(shifted_images[i][:, :, color_chanel].shape)
 
     return shifted_images
+
+
+def visualize_alignment(images, aligned_images, patch_indexes, image_index, width, color_indexes, offsets1, offsets2):
+    '''
+    Compare the patch before and after in the images
+    '''
+    old_patch = images[image_index][patch_indexes[0]: patch_indexes[0] + width, patch_indexes[1]: patch_indexes[1] + width, :]
+    new_patch = aligned_images[image_index][patch_indexes[0]: patch_indexes[0] + width, patch_indexes[1]: patch_indexes[1] + width, :]
+
+    fig = plt.figure()
+    ax = fig.add_subplot(1, 2, 1)
+    plt.imshow((old_patch.astype(np.float16) / (2 ** 16-1) * (2 ** 8-1)).astype(np.uint8))
+    ax.set_title('Before')
+    ax = fig.add_subplot(1, 2, 2)
+    plt.imshow((new_patch.astype(np.float16) / (2 ** 16 - 1) * (2 ** 8 - 1)).astype(np.uint8))
+    ax.set_title('After')
+
+    color_layer1_adjust = 'For color layer %d, x offset: %d, y offset: %d, z offset: %d' % (color_indexes[0], offsets1[0], offsets1[1], offsets1[2])
+    color_layer2_adjust = 'For color layer %d, x offset: %d, y offset: %d, z offset: %d' % (color_indexes[1], offsets2[0], offsets2[1], offsets2[2])
+    adjustment_info = color_layer1_adjust + "\n" + color_layer2_adjust
+    ax.text(-25, -10, adjustment_info, style='italic', bbox={'facecolor': 'red', 'alpha': 0.5, 'pad': 10})
+    plt.show()
+
+    return old_patch, new_patch
 
 
 def evaluate_normalization_with_mask(old_images, adjusted_images, mask):
@@ -302,6 +398,11 @@ def visualize_mask(image, mask, name):
     img = image.copy()
     img[np.logical_not(mask)] = 0
     scipy.misc.imsave(name + '.jpg', img)
+
+
+def display_image(image):
+    plt.imshow((image.astype(np.float16) / (2 ** 16-1) * (2 ** 8-1)).astype(np.uint8))
+    plt.show()
 
 
 def k_means(image, n_colors=64):
@@ -380,7 +481,17 @@ def read_tiff_image(file_name):
     return np.array(Image.open(file_name))
 
 
+def separate_colors(image, colors, image_name):
+    '''
+    Given an image (3D numpy array) and list of 3 element arrays representing colors, split it up into several different colors
+    '''
+    for index, color in enumerate(colors):
+        img = image.copy()
+        img[img != color] = 0
+        save_image(img, image_name + " color " + str(index) + ".jpg")
+
+
 def normalize_and_align():
-    images = read_czi_file("880 BI/TBX DIO TRE-XFP ScalesSQ 20x 1.0Wtile stack_Subset_Stitch.czi")
-    images = read_czi_file("880 BI/OB stack sparse low dose TBX 10x 70um.czi")
+    images = read_czi_file("../../880 BI/TBX DIO TRE-XFP ScalesSQ 20x 1.0Wtile stack_Subset_Stitch.czi")
+    images = read_czi_file("../../880 BI/OB stack sparse low dose TBX 10x 70um.czi")
     return images
