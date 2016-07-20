@@ -8,6 +8,8 @@ from sklearn.cluster import KMeans
 from sklearn.metrics import pairwise_distances_argmin
 from sklearn.utils import shuffle
 from skimage.measure import structural_similarity as ssim
+from math import sqrt
+from minisom import MiniSom
 
 
 def normalize_with_min_max(images, threshold_min, threshold_max):
@@ -318,16 +320,19 @@ def shift_color_chanel(offset, images, color_chanel):
             shifted_images[i][:, :, color_chanel] = shifted_images[i + abs(offset[2])][:, :, color_chanel]
 
         # fill in the rest with zeros
-        for i in range(len(shifted_images) - abs(offset[2]), len(shifted_images)):
-            shifted_images[i][:, :, color_chanel] = np.zeros(shifted_images[i][:, :, color_chanel].shape)
+        # for i in range(len(shifted_images) - abs(offset[2]), len(shifted_images)):
+        #     shifted_images[i][:, :, color_chanel] = np.zeros(shifted_images[i][:, :, color_chanel].shape)
+
+        shifted_images = shifted_images[:len(shifted_images) - abs(offset[2])]
 
     elif offset[2] < 0:
         # shift the z layer of the chanel down
         for i in reversed(range(abs(offset[2]), len(shifted_images))):
             shifted_images[i][:, :, color_chanel] = shifted_images[i - abs(offset[2])][:, :, color_chanel]
 
-        for i in range(abs(offset[2])):
-            shifted_images[i][:, :, color_chanel] = np.zeros(shifted_images[i][:, :, color_chanel].shape)
+        # for i in range(abs(offset[2])):
+        #     shifted_images[i][:, :, color_chanel] = np.zeros(shifted_images[i][:, :, color_chanel].shape)
+        shifted_images = shifted_images[abs(offset[2]):]
 
     return shifted_images
 
@@ -461,8 +466,20 @@ def k_means(image, n_colors=64):
     plt.show()
 
 
-def self_organization_map(image, n_colors=64):
-    pass
+def self_organization_map(image, dim, weights, n_colors=64):
+    pixels = np.reshape(image, (image.shape[0] * image.shape[1], 3))
+
+    # determine the dimensions
+    som = MiniSom(dim[0], dim[1], 3, weights=weights, sigma=0.1, learning_rate=0.2)  # 3x3 = 9 final colors
+
+    som.train_random(pixels, 100)
+
+    qnt = som.quantization(pixels)  # quantize each pixels of the image
+    clustered = np.zeros(image.shape)
+    for i, q in enumerate(qnt):
+        clustered[np.unravel_index(i, dims=(image.shape[0], image.shape[1]))] = q
+
+    return clustered * (2 ** 16 - 1)
 
 
 def read_czi_file(file_name):
