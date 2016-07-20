@@ -6,6 +6,8 @@ import numpy as np
 import cv2
 import matplotlib
 import saving_and_color
+import plotspace
+from PIL import Image
 
 # Docstring Format:
 # Param ArgName: (ArgType:) Description
@@ -62,7 +64,6 @@ class colorSpaces():
         self.nodeSize = [-2, 3]  # size of nodes drawn in colorspace
         self.validityMap = False
         self.doneDrawing = True  # implementation of dropped frames in colorspace view
-        self.updatingDynamic = True
 
     def addDynamicView(self, update):
         '''
@@ -106,9 +107,7 @@ class colorSpaces():
                 self.currentImage.setPixel(px + dx, py + dy, color)
 
     def circularFromMip(self, xyv):
-        print 'dealing in colorspace'
         [x, y, v] = xyv
-        print x, y, v
         self.intensitySlider.setValue(v)
         self.currentArea = [[x, y]]
         self.updateColorSpaceView(redraw=False)
@@ -210,6 +209,8 @@ class colorSpaces():
                         self.manualSelected = i
                         self.updateManualBoundary(ox, oy, False)
                         self.areaMode = 'manualUpdate'
+                        self.createValidityMap()
+                        self.createAreaView()
                         return
             self.currentArea.append([x, y])
             self.createPoint(x, y)
@@ -283,8 +284,6 @@ class colorSpaces():
             areaX.append(x)
             areaY.append(y)
         self.areas[self.indexArea] = (areaX, areaY, copy.copy(self.csImageVal))
-        if self.updatingDynamic:
-            self.createValidityMap()
 
     def finalizeBoundary(self):
         '''
@@ -375,8 +374,6 @@ class colorSpaces():
                 # change v value at current area in self.area history
                 (x, y, v) = self.areas[self.indexArea]
                 self.areas[self.indexArea] = (x, y, copy.copy(self.csImageVal))
-                if len(self.areas) == 1 or (len(self.areas) == 2 and not self.areas[1]):
-                    self.updatingDynamic = False
                 if self.areaMode == 'auto':
                     self.finalizeBoundary()
                 elif self.areaMode == 'manualUpdate':
@@ -384,7 +381,8 @@ class colorSpaces():
                     self.updateManualBoundary(x, y, False)
                 elif self.areaMode == 'manualCreate':
                     pass  # should be clearing self.currentArea and trashing old stuff######
-                self.updatingDynamic = True
+                if not (len(self.areas) == 1 or (len(self.areas) == 2 and not self.areas[1])):
+                    self.createValidityMap()
             self.drawColorSpaceView()
         self.createAreaView()
 
@@ -485,8 +483,6 @@ class colorSpaces():
         self.indexArea = len(self.areas) - 1 # shift index to latest area
         if self.areas[self.indexArea]: # no buffer is at the end: deleted from end
             self.addArea()
-            self.updateDynamic(False)
-            return
         self.drawingAreas[-1] = False
         self.currentArea = []
         self.updateColorSpaceView(False)
@@ -518,7 +514,7 @@ class colorSpaces():
                     return
 
     def volumeChange(self, text):
-        self.updateColorSpaceView(False)
+        self.addArea()
         self.volumes[self.indexVolume] = [copy.deepcopy(self.areas),
         copy.deepcopy(self.areaViewPoints), copy.deepcopy(self.drawingAreas),
                                           copy.deepcopy(self.currentArea)]
@@ -562,17 +558,17 @@ class colorSpaces():
 
     def createAreaView(self):
         (width, height) = (self.areaView.width(), self.areaView.height())
-        img = QtGui.QImage(width, height, QtGui.QImage.Format_RGB32)
-        img.fill(QtGui.qRgb(255, 255, 255))
+        img = QtGui.QImage(width, height, QtGui.QImage.Format_ARGB32)
+        img.fill(QtGui.qRgba(236, 236, 236, 255))
         self.areaViewPoints = []
         yshift = width / 4  # so that 255 and 0 can be easily targeted
         for i, area in enumerate(self.areas):
             if not area:
                 continue
             if i == self.indexArea:
-                color = QtGui.qRgb(255, 150, 150)
+                color = QtGui.qRgba(255, 150, 150, 255)
             else:
-                color = QtGui.qRgb(0, 0, 0)
+                color = QtGui.qRgba(0, 0, 0, 255)
             mid = int(float(height - 2 * yshift) * (1. - float(area[2]) / 255.)) + yshift
             lst = []
             for x in xrange(0, width):
@@ -592,7 +588,7 @@ class colorSpaces():
         self.areaView.show()
         del img
 
-    def createValidityMap(self, push=True):  #xv
+    def createValidityMap(self, push=True):  #vxy
         a = time.time()
         if push:
             self.volumes[self.indexVolume] = [copy.deepcopy(self.areas),
@@ -662,7 +658,6 @@ class colorSpaces():
                     maxx -= 1
                 dict['f'] = maxx
                 areaDicts.append(dict)
-        print 'in mapping', indvs
         orderedareas = [[i, v] for (v, i) in sorted(zip(indvs, ind))]
         [lowI, lowV] = orderedareas[0]
         for [highI, highV] in orderedareas[1::]:
@@ -693,16 +688,18 @@ class colorSpaces():
             self.updateDynamic(self.validityMap)
         print 'time to create validityMap ms:', (b-a) * 1000
 
-
-    def saveStack(self, after, before):
-        # maps = make validity map for every index
-        dialog = QtGui.QFileDialog()
-        opendirectory = str(dialog.getExistingDirectory())
-        if opendirectory == '':
+    def plotSpace(self):
+        if type(self.validityMap) is bool:
             return
-        maps = []
-        originalIndex = self.indexVolume
-        # initiate a progress bar
+        plotspace.displayValidityMap(self.validityMap, 8, 100)
+
+    def saveStack(self, boundsinclude=False, saving=True):
+        if saving:
+            dialog = QtGui.QFileDialog()
+            opendirectory = str(dialog.getExistingDirectory())
+            if opendirectory == '':
+                return
+        '''# initiate a progress bar
         bar = QtGui.QProgressBar()
         bar.setWindowTitle(QtCore.QString('Creating Masks...'))
         bar.setWindowModality(QtCore.Qt.WindowModal)
@@ -712,34 +709,30 @@ class colorSpaces():
         currentProgress = 0
         bar.setMaximum(len(self.volumes) * 2)
         bar.show()
-        QtGui.QApplication.processEvents()
+        QtGui.QApplication.processEvents()'''
+        originalIndex = self.indexVolume
+        maps = []
         for i in xrange(0, len(self.volumes)):
             self.indexVolume = i
             self.createValidityMap(push=False)
-            after = self.updateDynamic(self.validityMap, retrn=True)
-            currentProgress += 1
-            bar.setValue(currentProgress)
-            QtGui.QApplication.processEvents()
             if type(self.validityMap) == bool:
                 continue
-            rgbMap = self.getOriginalColorSpace(after, before)
-            maps.append(rgbMap)
-            currentProgress += 1
+            maps.append(self.validityMap.copy())
+            '''currentProgress += 1
             bar.setValue(currentProgress)
             QtGui.QApplication.processEvents()
-        bar.close()
-        a = time.time()
-        saving_and_color.applyToStack(maps, self.view.width(), opendirectory)
-        b = time.time()
-        print 'minutes to apply to stack: %.2f' % ((b - a) / 60)
+        bar.close()'''
         self.indexVolume = originalIndex
         [self.areas, self.areaViewPoints, self.drawingAreas,
                         self.currentArea] = self.volumes[self.indexVolume]
+        if saving:
+            saving_and_color.applyToStack(maps, self.view.width(), opendirectory, boundsinclude)
+        else:
+            return maps
+
 
     def getOriginalColorSpace(self, after, before):
         rgbMap = np.zeros((256, 256, 256), dtype=bool)
-        before /= 256
-        before = before.astype(np.uint8)
         width, height = after.shape[1], after.shape[0]
         for y in xrange(0, height):
             for x in xrange(0, width):

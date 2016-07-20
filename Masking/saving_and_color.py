@@ -1,5 +1,6 @@
 import numpy as np
-from scipy import misc, ndimage
+from scipy import ndimage
+from scipy.ndimage.filters import median_filter
 from PyQt4 import QtGui, QtCore
 import cv2
 import tifffile
@@ -7,7 +8,8 @@ import os
 import math
 import re
 import time
-import scipy.misc
+import arrayfire as af
+
 
 def saveMIP(validityMap, mappedMip, data, size): #####################fix this. what is this even doing?
     dialog = QtGui.QFileDialog()
@@ -52,7 +54,7 @@ def saveMIP(validityMap, mappedMip, data, size): #####################fix this. 
     QtGui.QApplication.processEvents()
 
 
-def applyToStack(rgbMaps, size, opendirectory):
+def applyToStack(xyvMaps, size, opendirectory, boundsinclude):
     # initiate a progress bar
     bar = QtGui.QProgressBar()
     bar.setWindowTitle(QtCore.QString('Applying Mask to Stack...'))
@@ -83,7 +85,7 @@ def applyToStack(rgbMaps, size, opendirectory):
         return
     files = [y for (x, y) in sorted(zip(fileIndices, files))]
     # update progress bar configuration
-    bar.setMaximum(((len(files) + 2) * len(rgbMaps)))
+    bar.setMaximum(((len(files) + 2) * len(xyvMaps)))
     progress = 0
     bar.show()
     QtGui.QApplication.processEvents()
@@ -97,9 +99,9 @@ def applyToStack(rgbMaps, size, opendirectory):
                  saveDilatedStackDir, saveUndilatedStackDir]:
         if not os.path.exists(path):
             os.makedirs(path)
-    radius = size / 2
-    numpystacks = [[] for x in xrange(0, len(rgbMaps))]  # [Color[Stack]]
+    numpystacks = [[] for x in xrange(0, len(xyvMaps))]  # [Color[Stack]]
     originalStack = []
+    radius = size / 2
     for filenum, file in enumerate(files):
         bar.setWindowTitle(QtCore.QString('Applying Mask to Stack...to Z-Layer %d Color 1' % (filenum+1)))
         QtGui.QApplication.processEvents()
@@ -109,25 +111,30 @@ def applyToStack(rgbMaps, size, opendirectory):
         if original.shape[2] == 4:
             original = original[:, :, 0:3]
         originalStack.append(original)
-        rgb = original.copy()
-        if rgb.dtype == np.uint16:
+        assert (original.dtype != np.uint8)
+        if boundsinclude == [[[0, 127, 255], [0, 127, 255], [0, 127, 255]], [True, True, True]]:
+            rgb = original.copy()
             rgb /= 256
             rgb = rgb.astype(np.uint8)
+        else:
+            [bounds, include] = boundsinclude
+            rgb = rgbCorrection(original.astype(np.float32), bounds, False, include)  # apply correction to rgb
+        xyv = rgbtoxyv(rgb, radius)
         height, width, numcolors = original.shape
         original = original.reshape((height * width), numcolors)
         if numcolors == 3:
             black = [0, 0, 0]
         elif numcolors == 4:
             black = [0, 0, 0, 255]
-        for color, map in enumerate(rgbMaps):
+        for color, map in enumerate(xyvMaps):
             # process the array
-            cropped = original.copy()
+            cropped = original.copy()  # what is to be saved
             indices = []
             for py in xrange(0, height):
                 yshift = py * width
                 for px in xrange(0, width):
-                    [r, g, b] = rgb[py][px]
-                    if not map[r, g, b]:
+                    [x, y, v] = xyv[0][py][px], xyv[1][py][px], xyv[2][py][px]
+                    if not map[v, x, y]:
                         indices.append((yshift + px))
             cropped[indices] = black  # set pixels to black
             cropped = cropped.reshape(height, width, numcolors)  # reshape back to normal
@@ -140,7 +147,7 @@ def applyToStack(rgbMaps, size, opendirectory):
             bar.setValue(progress)
             bar.setWindowTitle(QtCore.QString('Applying Mask to Stack...to Z-Layer %d Color %d' % (filenum+1, color+2)))
             QtGui.QApplication.processEvents()
-    for color in xrange(0, len(rgbMaps)):
+    for color in xrange(0, len(xyvMaps)):
         bar.setWindowTitle(QtCore.QString('Creating MIP for Color %d' % (color+1)))
         QtGui.QApplication.processEvents()
         mip = np.maximum.reduce(numpystacks[color])
@@ -151,7 +158,7 @@ def applyToStack(rgbMaps, size, opendirectory):
     dim3bools = []
     for color in numpystacks:
         rgb3D = np.array(color)
-        bool3D = rgb3D[:,:,:,0] > 0
+        bool3D = rgb3D[:, :, :, 0] > 0
         dim3bools.append(bool3D)
     dilationStruct = np.array([[[False, False, False], [False, True, False], [False, False, False]],  # z = -1
                               [[False, True, False], [True, True, True], [False, True, False]],  # z = 0
@@ -160,12 +167,19 @@ def applyToStack(rgbMaps, size, opendirectory):
         bar.setWindowTitle(QtCore.QString('Dilating Color %d and Saving Stack with MIP' % (color + 1)))
         QtGui.QApplication.processEvents()
         dilated3DMask = ndimage.binary_dilation(image, structure=dilationStruct)
+        # the following median filter is in beta #########################
+        for x in xrange(0, 2):
+            dilated3DMask = median_filter(dilated3DMask, size=(3, 3, 3))  # this is in beta
+            dilated3DMask = ndimage.binary_dilation(dilated3DMask, structure=dilationStruct)
+        dilated3DMask = ndimage.binary_dilation(dilated3DMask, structure=dilationStruct)
+        # end beta #######################################################
         dilated3DMask = np.expand_dims(dilated3DMask, axis=3)
         dilated3DMask = np.repeat(dilated3DMask, originalStack[0].shape[2], axis=3)
         # dilated3DMask = dilated3DMask.astype(np.uint16)
         dilatedStack = []
         for layer, file in enumerate(files):
             dilatedImage = dilated3DMask[layer] * originalStack[layer]
+            dilatedImage = median_filter(dilatedImage, size=(3, 3, 1))  # this is in beta
             # dilatedImage = cv2.bitwise_and(originalStack[layer], originalStack[layer], mask=dilated3DMask[layer])  # dilated3DMask[layer] * originalStack[layer]
             dilatedStack.append(dilatedImage)
             tifffile.imsave((saveDilatedStackDir + ('Dilated_Color%d_' % (color+1)) + file), dilatedImage)
@@ -175,6 +189,55 @@ def applyToStack(rgbMaps, size, opendirectory):
         progress += 1
         bar.setValue(progress)
         QtGui.QApplication.processEvents()
+
+def rgbCorrection(img, bounds, gpuMode, include):
+    # converts a float32 to 8uint arr
+    r, g, b = img[:, :, 0], img[:, :, 1], img[:, :, 2]
+    for c, color in enumerate([r, g, b]):
+        height, width = color.shape[0], color.shape[1]
+        if not include[c]:
+            img[:, :, c] = np.zeros((height, width))
+            continue
+        [i, m, f] = bounds[c]
+        i, m, f = i * 256, m * 256, f * 256
+        maximum = 65535  # in 16-bit unsigned
+        color[color < i] = i
+        color[color > f] = f
+        predictedMid = (i + f) / 2
+        if gpuMode:
+            color = color.reshape((width * height))
+        overmid = color.copy()
+        overmidmask = (overmid >= m)
+        if gpuMode:
+            overmid = af.interop.np_to_af_array(overmid)
+            for ii in af.ParallelRange(width*height):
+                overmid[ii] -= m
+                overmid[ii] *= (float(maximum - predictedMid) / (f - m))
+                overmid[ii] += predictedMid
+            overmid = np.array(overmid)
+            overmid = overmid.reshape(height, width)
+        else:
+            overmid = ((overmid-m) * (float(maximum - predictedMid) / (f - m))) + predictedMid
+        overmid *= overmidmask
+        undermid = color
+        undermidmask = (undermid < m)
+        if gpuMode:
+            undermid = af.interop.np_to_af_array(undermid)
+            for ii in af.ParallelRange(width*height):
+                undermid[ii] -= i
+                undermid[ii] *= (float(predictedMid - i) / (m - i))
+            undermid = np.array(undermid)
+            undermid = undermid.reshape(height, width)
+        else:
+            undermid -= i
+            undermid *= (float(predictedMid - i) / (m - i))
+        undermid *= undermidmask
+        color = undermid + overmid
+        img[:, :, c] = color
+    img /= 256
+    img = img.astype(np.uint8)
+    return img
+
 
 
 def rgbtoxyv(rgb, radius):

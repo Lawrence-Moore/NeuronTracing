@@ -5,6 +5,10 @@ from colorspace import colorSpaces
 from mip import mips
 import time
 import arrayfire as af
+import numpy as np
+from PIL import Image
+import saving_and_color
+import copy
 
 #print af.info()
 sys.setrecursionlimit(50000)  # for packaging into OSX
@@ -58,13 +62,38 @@ class Run(QtGui.QMainWindow):
         self.ui.saveDynamicButton.released.connect(self.mipViews.saveImage)
         self.ui.applyStackButton.released.connect(self.savingStack)
         self.ui.editImageButton.released.connect(self.mipViews.editImage)
+        self.ui.plotButton.released.connect(self.colorSpace.plotSpace)
+        self.ui.maps2LawrenceButton.released.connect(self.maps2LawrenceStart)
+        self.ui.neuronsDoneButton.setVisible(False)
+        self.ui.neuronsDoneButton.released.connect(self.maps2LawrenceFinish)
 
     def resizeEvent(self, event):
         width, height = event.size().width(), event.size().height()
         self.remakeLayout(width, height)
 
+    def maps2LawrenceStart(self):
+        if not self.mipViews.filename:
+            return
+        dialog = QtGui.QMessageBox(self)
+        dialog.setText(QtCore.QString('Choose Neurons/Colors from MIP Full View'
+            '. When you are finished, press done.'))
+        dialog.show()
+        self.ui.neuronsDoneButton.setVisible(True)
+        self.mipViews.neuronLocating = True
+        self.mipViews.updateMipView()
+
+    def maps2LawrenceFinish(self):
+        self.mipViews.neuronLocating = False
+        self.ui.neuronsDoneButton.setVisible(False)
+        neuronsList = copy.copy(self.mipViews.selectedNeurons)
+        # do stuff with list of neuronsList
+        # maps = self.colorSpace.saveStack(saving=False)
+        # copy.copy(self.mipViews.boundsInclude)
+        self.mipViews.selectedNeurons = []
+        self.mipViews.updateMipView()
+
     def savingStack(self):
-        self.colorSpace.saveStack(self.mipViews.originalImage, self.mipViews.imageBeforeEditing)
+        self.colorSpace.saveStack(copy.copy(self.mipViews.boundsInclude))
 
     def remakeLayout(self, width, height):
         '''
@@ -88,6 +117,9 @@ class Run(QtGui.QMainWindow):
         self.ui.mipFull.move(x, y)
         self.ui.mipFull.resize(side, side)
         self.ui.mipDynamic.move(x, (height / 2))
+        ax, ay = x + side + 10, (height / 2) + side - self.ui.maps2LawrenceButton.height()
+        self.ui.maps2LawrenceButton.move(ax, ay)
+        self.ui.neuronsDoneButton.move(ax, ay - self.ui.neuronsDoneButton.height() - 5)
         self.ui.mipDynamic.resize(side, side)
         x += side + 10
         bside, bseparation = side * .07, side * .1
@@ -143,6 +175,7 @@ class Run(QtGui.QMainWindow):
         '''
         self.ui.colorSpace.move(20, y)
         self.ui.colorSpace.resize(side, side)
+        self.ui.plotButton.move(20, y - self.ui.plotButton.height() - 5)
         x = side + 30
         w = int(.02*width)
         self.ui.areaSelectionView.move(x, y - w/4)
@@ -169,7 +202,8 @@ class Run(QtGui.QMainWindow):
             self.mipViews.updateMipView()
         self.ui.intensityLabel.setTextFormat(QtCore.Qt.PlainText)
         if side > 400:  # change size of node drawn in colorSpace
-            self.colorSpace.nodeSize = [int(-1 * side / 200), int((side / 200) + 1)]
+            self.colorSpace.nodeSize = [int(-1 * side / 130), int((side / 130) + 1)]
+        self.colorSpace.createAreaView()
 
     def keyPressEvent(self, event):
         key = event.key()
@@ -195,7 +229,6 @@ class Run(QtGui.QMainWindow):
             radius = self.colorSpace.side / 2
             self.colorSpace.updateManualBoundary(radius, radius, False)
 
-
     def eventFilter(self, source, event):
         # respond to mouse events in colorSpace after importing file to mipViews
         if source == self.ui.colorSpace.viewport():
@@ -218,11 +251,11 @@ class Run(QtGui.QMainWindow):
                     self.colorSpace.createBoundary(pos.x(), pos.y())
                     self.colorSpace.finalizeBoundary()
                     self.colorSpace.createAreaView()
+                    self.colorSpace.createValidityMap()
             elif self.colorSpace.areaMode == 'manualCreate':
                 if event.type() == QtCore.QEvent.MouseButtonPress:
                     pos = event.pos()
                     self.colorSpace.createManualBoundary(pos.x(), pos.y())
-                    self.colorSpace.createAreaView()
             elif self.colorSpace.areaMode == 'manualUpdate':
                 if event.type() == QtCore.QEvent.MouseButtonPress:
                     self.colorSpace.mouseHold = True
@@ -234,8 +267,9 @@ class Run(QtGui.QMainWindow):
                     self.colorSpace.updateManualBoundary(pos.x(), pos.y(), False)
                     QtGui.QApplication.processEvents()
                     self.colorSpace.doneDrawing = True
-                elif event.type() == QtCore.QEvent.MouseButtonRelease:
+                elif event.type() == QtCore.QEvent.MouseButtonRelease and self.colorSpace.mouseHold:
                     self.colorSpace.mouseHold = False
+                    self.colorSpace.createValidityMap()
             elif self.colorSpace.areaMode == 'circular':
                 if event.type() == QtCore.QEvent.MouseButtonPress:
                     self.colorSpace.mouseHold = True
@@ -250,14 +284,18 @@ class Run(QtGui.QMainWindow):
                     self.colorSpace.circularRadius(pos.x(), pos.y())
                     self.colorSpace.circularCreate()
                     self.colorSpace.createAreaView()
+                    self.colorSpace.createValidityMap()
         elif source == self.ui.areaSelectionView.viewport() and event.type()\
                 == QtCore.QEvent.MouseButtonPress:
             pos = event.pos()
             self.colorSpace.getPreviousArea(pos.x(), pos.y())
         elif source == self.ui.mipFull.viewport() and event.type() == QtCore.QEvent.MouseButtonPress:
             pos = event.pos()
-            xyv = self.mipViews.mip2ColorSpace(pos.x(), pos.y())
-            self.colorSpace.circularFromMip(xyv)
+            if self.mipViews.neuronLocating:
+                self.mipViews.getNeuronLocation(pos.x(), pos.y(), True)
+            else:
+                xyv = self.mipViews.getNeuronLocation(pos.x(), pos.y())
+                self.colorSpace.circularFromMip(xyv)
         if event.type() == QtCore.QEvent.MouseButtonPress:
             self.debugLog()
         return False

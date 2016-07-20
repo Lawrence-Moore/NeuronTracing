@@ -35,8 +35,11 @@ class mips():
         self.editButton.setVisible(False)
         self.gpuMode = gpumode
         self.selectionMask = False
+        # whether neuron locations
+        self.neuronLocating = False
+        self.selectedNeurons = []
 
-    def mip2ColorSpace(self, mx, my):
+    def getNeuronLocation(self, mx, my, neuronSelecting=False):
         if not self.filename:
             return
         viewWidth, viewHeight = self.fullView.width(), self.fullView.height()
@@ -55,8 +58,9 @@ class mips():
         v[v < 100] = cv
         avgX, avgY, avgV = np.mean(x).astype(int), np.mean(y).astype(int), np.mean(v).astype(int)
         ########
-        mask = QtGui.QImage(self.fullView.width(), self.fullView.width(), QtGui.QImage.Format_ARGB32)  # this assumes fullView and dynamicView are congruent
-        mask.fill(QtGui.qRgba(0, 0, 0, 0))
+        if type(self.selectionMask) is bool:
+            self.selectionMask = QtGui.QImage(self.fullView.width(), self.fullView.width(), QtGui.QImage.Format_ARGB32)  # this assumes fullView and dynamicView are congruent
+            self.selectionMask.fill(QtGui.qRgba(0, 0, 0, 0))
         px, py = float(px), float(py)
         left = int((((px - r) - xi) / width) * viewWidth - 1)
         right = int((((px + r) - xi) / width) * viewWidth + 1)
@@ -67,13 +71,16 @@ class mips():
         else:
             color = QtGui.qRgba(0, 0, 0, 255)
         for x in xrange(left, right):
-            mask.setPixel(x, up, color)
-            mask.setPixel(x, down, color)
+            self.selectionMask.setPixel(x, up, color)
+            self.selectionMask.setPixel(x, down, color)
         for y in xrange(down, up+1):
-            mask.setPixel(right, y, color)
-            mask.setPixel(left, y, color)
-        self.selectionMask = QtGui.QPixmap.fromImage(mask)
-        self.updateMipView()
+            self.selectionMask.setPixel(right, y, color)
+            self.selectionMask.setPixel(left, y, color)
+        self.updateMipView(cleanMask=False)
+        if neuronSelecting:
+            self.selectedNeurons.append([avgX, avgY, avgV])
+            print self.selectedNeurons
+            return
         return [avgX, avgY, avgV]
 
     def importImage(self):
@@ -86,7 +93,7 @@ class mips():
         self.filename = str(dialog.getOpenFileName())
         if not self.filename:  # user pressed cancel
             return
-        self.bounds = [[0, 127, 255], [0, 127, 255], [0, 127, 255]]
+        self.boundsInclude = [[[0, 127, 255], [0, 127, 255], [0, 127, 255]], [True, True, True]]
         self.croparea = False
         QtGui.QApplication.processEvents()
         self.validityMap = False
@@ -114,7 +121,9 @@ class mips():
         self.croparea = [0, 0, self.originalImage.shape[1], self.originalImage.shape[0]]
         self.updateMipView()
 
-    def updateMipView(self):
+    def updateMipView(self, cleanMask=True):
+        if cleanMask:
+            self.selectionMask = False
         [xi, yi, xf, yf] = self.croparea
         self.fullImage = self.originalImage[yi:yf, xi:xf]
         fullResized = cv2.resize(self.fullImage, (self.fullView.width(), self.fullView.height()))
@@ -126,8 +135,9 @@ class mips():
         pic = QtGui.QPixmap.fromImage(resizedImg)
         scene.addItem(QtGui.QGraphicsPixmapItem(pic))
         if type(self.selectionMask) is not bool:
-            temp = self.selectionMask.copy()  # b/c selectionMask is destroyed after use
-            scene.addItem(QtGui.QGraphicsPixmapItem(temp))
+            img = self.selectionMask.copy()  # b/c selectionMask is destroyed after use
+            pixmap = QtGui.QPixmap.fromImage(img)
+            scene.addItem(QtGui.QGraphicsPixmapItem(pixmap))
         # push scene to fullView
         self.fullView.setScene(scene)
         self.fullView.setRenderHint(QtGui.QPainter.Antialiasing)
@@ -157,6 +167,8 @@ class mips():
         black, an RGBA of (0, 0, 0, 0).
         :return:
         '''
+        if not self.neuronLocating:
+            self.selectionMask = False
         if type(map) is bool:
             # if this module doesn't have its copy of the validity map and one
             # wasn't passed in (map=False), don't crop anything and redraw
@@ -182,7 +194,6 @@ class mips():
         else:
             cropped = self.originalImage.copy()
             width, height = self.originalImage.shape[1], self.originalImage.shape[0]
-            print cropped.shape, width, height, cropped.dtype
         cropped = cropped.reshape((width * height), 3)
         indices = []
         a = time.time()
@@ -317,8 +328,9 @@ class mips():
         pic = QtGui.QPixmap.fromImage(img)
         scene.addItem(QtGui.QGraphicsPixmapItem(pic))  # add image to scene
         if type(self.selectionMask) is not bool:
-            scene.addItem(QtGui.QGraphicsPixmapItem(self.selectionMask))
-            self.selectionMask = False
+            img = self.selectionMask.copy()  # b/c selectionMask is destroyed after use
+            pixmap = QtGui.QPixmap.fromImage(img)
+            scene.addItem(QtGui.QGraphicsPixmapItem(pixmap))
         # push scene to dynamicView's graphics window
         self.dynamicView.setScene(scene)
         self.dynamicView.setRenderHint(QtGui.QPainter.Antialiasing)
@@ -331,12 +343,13 @@ class mips():
     def editImage(self): ######################## the button should only be made visible after importing an image
         if not self.filename:
             return
-        self.eWindow = EditWindow(self.imageBeforeEditing, self.gpuMode, self.bounds, parent=self)
+        self.eWindow = EditWindow(self.imageBeforeEditing, self.gpuMode, self.boundsInclude, parent=self)
         self.eWindow.setGeometry(QtCore.QRect(200, 100, 950, 500))
         self.eWindow.show()
         self.eWindow.saveImageButton.released.connect(self.getEditedImage)
 
     def getEditedImage(self):
-        self.originalImage, self.bounds = self.eWindow.returnEditedImage()
+        self.originalImage, self.boundsInclude = self.eWindow.returnEditedImage()
         self.createMappedMip()
         self.updateMipView()
+        self.updateDynamic(self.validityMap)

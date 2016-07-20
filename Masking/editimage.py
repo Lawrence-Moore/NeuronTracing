@@ -3,9 +3,12 @@ import time
 import numpy as np
 import cv2
 import arrayfire as af
+import saving_and_color
+import copy
+from PIL import Image
 
 class EditWindow(QtGui.QMainWindow):
-    def __init__(self, img, gpumode, bounds, parent=None):
+    def __init__(self, img, gpumode, boundsinclude, parent=None):
         QtGui.QMainWindow.__init__(self)
         self.doneInitializing = False
         self.donePushing = True
@@ -17,7 +20,7 @@ class EditWindow(QtGui.QMainWindow):
         self.view.setFrameStyle(QtGui.QFrame.NoFrame)
         self.view.show()
         self.image = img
-        self.bounds = bounds
+        [self.bounds, self.include] = boundsinclude
         self.w2hratio = 5  # in the sliders
         self.colors = ['R: ', 'G: ', 'B: ']
         self.sliders = []
@@ -67,11 +70,14 @@ class EditWindow(QtGui.QMainWindow):
         self.gCheck = QtGui.QCheckBox(self)
         self.bCheck = QtGui.QCheckBox(self)
         self.checks = []
-        for check in [self.rCheck, self.gCheck, self.bCheck]:
-            check.setChecked(True)
+        for c, check in enumerate([self.rCheck, self.gCheck, self.bCheck]):
+            if self.include[c]:
+                check.setChecked(True)
+            else:
+                check.setChecked(False)
             check.show()
             self.checks.append(check)
-            check.stateChanged.connect(self.rangesRelay)
+            check.stateChanged.connect(self.checkChange)
         self.image2View(self.image)
         # create save and reset buttons
         self.saveImageButton = QtGui.QPushButton(self)
@@ -82,8 +88,14 @@ class EditWindow(QtGui.QMainWindow):
         self.activeSlider = 0  # min/mid/max
         self.mouseHold = False
         self.doneInitializing = True
+        print 'done init: editimage', self.bounds
 
-    def rangesRelay(self):
+    def checkChange(self):
+        for c in xrange(0, 3):
+            if self.checks[c].isChecked():
+                self.include[c] = True
+            else:
+                self.include[c] = False
         if self.doneInitializing:
             self.ranges2View()
 
@@ -111,7 +123,15 @@ class EditWindow(QtGui.QMainWindow):
         return False
 
     def resetBounds(self):
+        if not self.doneInitializing:
+            return
+        print 'resetting..'
         self.bounds = [[0, 127, 255], [0, 127, 255], [0, 127, 255]]
+        self.include = [True, True, True]
+        for check in self.checks:
+            check.blockSignals(True)
+            check.setChecked(True)
+            check.blockSignals(False)
         # set the text fields, and sliders to the appropriate value
         for color, (label, maxField, minField) in enumerate([(self.rLabel,
                 self.rMaxField, self.rMinField), (self.gLabel,
@@ -236,10 +256,13 @@ class EditWindow(QtGui.QMainWindow):
                 self.bounds[color][2] = 255
             if self.bounds[color][0] < 0:
                 self.bounds[color][0] = 0
-            self.bounds[color][1] = (self.bounds[color][2] + self.bounds[color][0]) / 2
+            mid = (self.bounds[color][2] + self.bounds[color][0]) / 2
             if self.bounds[color][0] >= self.bounds[color][2]:
-                self.bounds[color][0] = self.bounds[color][1] - 1
-                self.bounds[color][2] = self.bounds[color][1] + 1
+                self.bounds[color][0] = mid - 1
+                self.bounds[color][2] = mid + 1
+            if self.bounds[color][1] >= self.bounds[color][2] \
+                    or self.bounds[color][1] <= self.bounds[color][0]:
+                self.bounds[color][1] = mid
             maxField.setText(QtCore.QString(str(self.bounds[color][2])))
             maxField.moveCursor(QtGui.QTextCursor.End)
             minField.setText(QtCore.QString(str(self.bounds[color][0])))
@@ -277,50 +300,7 @@ class EditWindow(QtGui.QMainWindow):
         else:
             self.donePushing = False
             adjusted = cv2.resize(self.image, (self.view.width(), self.view.height()))
-        r, g, b = adjusted[:, :, 0], adjusted[:, :, 1], adjusted[:, :, 2]
-        for c, color in enumerate([r, g, b]):
-            height, width = color.shape[0], color.shape[1]
-            if not self.checks[c].isChecked():
-                adjusted[:, :, c] = np.zeros((height, width))
-                continue
-            [i, m, f] = self.bounds[c]
-            i, m, f = i * 256, m * 256, f * 256
-            maximum = 65535  # in 16-bit unsigned
-            color[color < i] = i
-            color[color > f] = f
-            predictedMid = (i + f) / 2
-            if self.gpuMode:
-                color = color.reshape((width * height))
-            overmid = color.copy()
-            overmidmask = (overmid >= m)
-            if self.gpuMode:
-                overmid = af.interop.np_to_af_array(overmid)
-                for ii in af.ParallelRange(width*height):
-                    overmid[ii] -= m
-                    overmid[ii] *= (float(maximum - predictedMid) / (f - m))
-                    overmid[ii] += predictedMid
-                overmid = np.array(overmid)
-                overmid = overmid.reshape(height, width)
-            else:
-                overmid = ((overmid-m) * (float(maximum - predictedMid) / (f - m))) + predictedMid
-            overmid *= overmidmask
-            undermid = color
-            undermidmask = (undermid < m)
-            if self.gpuMode:
-                undermid = af.interop.np_to_af_array(undermid)
-                for ii in af.ParallelRange(width*height):
-                    undermid[ii] -= i
-                    undermid[ii] *= (float(predictedMid - i) / (m - i))
-                undermid = np.array(undermid)
-                undermid = undermid.reshape(height, width)
-            else:
-                undermid -= i
-                undermid *= (float(predictedMid - i) / (m - i))
-            undermid *= undermidmask
-            color = undermid + overmid
-            adjusted[:, :, c] = color
-        adjusted /= 256
-        adjusted = adjusted.astype(np.uint8)
+        adjusted = saving_and_color.rgbCorrection(adjusted, self.bounds, self.gpuMode, self.include)
         if unscaled:
             self.returnImage = adjusted
         else:
@@ -343,7 +323,6 @@ class EditWindow(QtGui.QMainWindow):
         self.view.setScene(scene)
         self.view.setRenderHint(QtGui.QPainter.Antialiasing)
         self.view.show()
-        del img
         QtGui.QApplication.processEvents()
         self.donePushing = True
 
@@ -396,5 +375,10 @@ class EditWindow(QtGui.QMainWindow):
 
     def returnEditedImage(self):
         self.ranges2View(True)
-        return self.returnImage, self.bounds
+        return self.returnImage, [self.bounds, self.include]
+
+
+
+
+
 

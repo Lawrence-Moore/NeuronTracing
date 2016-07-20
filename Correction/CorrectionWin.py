@@ -51,7 +51,7 @@ class Correction(QtGui.QMainWindow):
         # self.unalignedImages = [[Original[z-Layers:QImages], Normal[z-Layers]colorLayers:QImages], Thresholded[z-Layers][colorLayers:QImages]]
         # self.alignedImages = [Normal[z-Layers:QImages], Thresholded[z-Layers:QImages]
         # self.unalignedData = [Normal[z-Layers:NumpyArrs], Thresholded[z-Layers:NumpyArrs]]
-        # self.alignedData = [Normal[z-Layers:NumpyArrs], Thresholded[z-Layers:NumpyArrs]]
+        # self.alignedData = [Normal[z-Layers:NumpyArrs]] #, Thresholded[z-Layers:NumpyArrs]]
         self.ui.channelSelectMenu.currentIndexChanged.connect(self.channelSelectionChanged)
         self.ui.saveButton.released.connect(self.saveImage)
         self.ui.saveButton.setVisible(False)
@@ -159,7 +159,7 @@ class Correction(QtGui.QMainWindow):
         if not self.filename:  # nothing was imported
             return
         if self.alignMode:  # ready to be aligned
-            # initiate a progress bar
+            '''# initiate a progress bar
             bar = QtGui.QProgressBar()
             bar.setWindowTitle(QtCore.QString('Aligning Images'))
             bar.setWindowModality(QtCore.Qt.WindowModal)
@@ -167,7 +167,7 @@ class Correction(QtGui.QMainWindow):
             bar.move(self.ui.beforeView.width(), self.ui.beforeView.width())
             bar.setMaximum(2)
             bar.show()
-            QtGui.QApplication.processEvents()
+            QtGui.QApplication.processEvents()'''
             # finish initiating progress bar
             self.alignedImages = []
             self.alignedData = []
@@ -180,9 +180,10 @@ class Correction(QtGui.QMainWindow):
             # make normal aligned images
             normalAligned = align_images(self.unalignedData[0], True, x, y, width, colorlayer, self.indexLayer)
             self.alignedData.append(normalAligned)
-            bar.setWindowTitle(QtCore.QString('Caching Aligned Images'))
+            self.ui.layerSlider.setMaximum((len(normalAligned) - 1))
+            '''bar.setWindowTitle(QtCore.QString('Caching Aligned Images'))
             bar.setValue(1)
-            QtGui.QApplication.processEvents()
+            QtGui.QApplication.processEvents()'''
             normalAImages = []
             for datum in normalAligned:
                 normalAImages.append(self.array16ToQImage(datum))
@@ -208,9 +209,10 @@ class Correction(QtGui.QMainWindow):
             self.alignMode = False
             self.ui.channelSelectMenu.setVisible(False)
             self.drawAfterView()
-            bar.close()
+            '''bar.close()'''
         else:  # already aligned, so redraw unaligned images
             self.alignedImages = []
+            self.ui.layerSlider.setMaximum((len(self.unalignedData[0]) - 1))
             self.ui.alignButton.setText(QtCore.QString('Align'))
             self.alignMode = True
             self.ui.channelSelectMenu.setVisible(True)
