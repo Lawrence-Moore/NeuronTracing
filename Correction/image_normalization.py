@@ -226,7 +226,10 @@ def match_patch(images, patch_index, patch, width, image_index, color_index, wig
 
     # go through and find the greatest similarity in the layers
     # check for the range
-    for z_offset in range(-20, 20):
+    offset = 20
+    min_shift = -1 * min(offset, image_index)
+    max_shift = min(offset + image_index, len(images)) - image_index
+    for z_offset in range(min_shift, max_shift):
         image = images[image_index + z_offset]
 
         # get the region to check. It should be the size of the patch plus some wiggle room around the edges
