@@ -144,6 +144,8 @@ def align_images(images, manual=False, template_top_left_x=0,
 
         aligned_images, offsets1 = adjust_color_layer(images, color_indexes[0], patch_indexes, patch, template_image_index, template_width)
         aligned_images, offsets2 = adjust_color_layer(aligned_images, color_indexes[1], patch_indexes, patch, template_image_index, template_width)
+        if template_image_index >= len(aligned_images):
+            template_image_index = len(aligned_images) - 1
         visualize_alignment(images, aligned_images, patch_indexes, template_image_index, template_width, color_indexes, offsets1, offsets2)
         return aligned_images
     else:
@@ -160,6 +162,8 @@ def align_images(images, manual=False, template_top_left_x=0,
 
         aligned_images, offsets1 = adjust_color_layer(images, color_indexes[0], patch_indexes, patch, image_index, width)
         aligned_images, offsets2 = adjust_color_layer(aligned_images, color_indexes[1], patch_indexes, patch, image_index, width)
+        if template_image_index >= len(aligned_images):
+            template_image_index = len(aligned_images) - 1
         visualize_alignment(images, aligned_images, patch_indexes, image_index, width, color_indexes, offsets1, offsets2)
 
         return aligned_images
