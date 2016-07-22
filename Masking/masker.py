@@ -32,14 +32,19 @@ class Run(QtGui.QMainWindow):
             self.gpuMode = True
         except:
             self.gpuMode = False
+        # make icons from files
+        self.toolIcon = QtGui.QIcon(QtCore.QString('images/tool.png'))
+        self.cubeIcon = QtGui.QIcon(QtCore.QString('images/cube.png'))
+        self.colorMode = 'hsv'
         # create color space, attach signal: slider, add event to filter
         self.colorSpace = colorSpaces(self.ui.colorSpace,
             self.ui.intensityLabel, self.ui.intensitySlider, self.ui.volumeSelect,
-            self.ui.modeMenu, self.ui.areaSelectionView)
+            self.ui.drawMenu, self.ui.areaSelectionView, self.colorMode)
         self.ui.intensitySlider.valueChanged.connect(self.colorSpace.updateColorSpaceView)
         self.ui.colorSpace.viewport().installEventFilter(self)
         self.ui.colorSpace.viewport().setMouseTracking(True)
-        self.ui.modeMenu.activated[str].connect(self.colorSpace.modeChange)
+        self.ui.drawMenu.activated[str].connect(self.colorSpace.drawModeChange)
+        self.ui.colorMenu.activated[str].connect(self.colorModeChange)
         self.ui.deleteVolume.clicked.connect(self.colorSpace.deleteVolume)
         self.ui.addAreaButton.clicked.connect(self.colorSpace.addArea)
         self.ui.delAreaButton.clicked.connect(self.colorSpace.deleteArea)
@@ -49,7 +54,8 @@ class Run(QtGui.QMainWindow):
         self.ui.mipDynamic.viewport().installEventFilter(self)
         self.ui.mipDynamic.viewport().setMouseTracking(True)
         # create mip views
-        self.mipViews = mips(self.ui.mipFull, self.ui.mipDynamic, self.ui.colorSpace, self.ui.editImageButton, self.gpuMode)
+        self.mipViews = mips(self.ui.mipFull, self.ui.mipDynamic, self.ui.colorSpace,
+                             self.ui.editImageButton, self.gpuMode, self.colorMode)
         self.colorSpace.addDynamicView(self.mipViews.updateDynamic)
         self.ui.plusZoom.pressed.connect(self.mipViews.zoomPlus)
         self.ui.minusZoom.pressed.connect(self.mipViews.zoomMinus)
@@ -70,6 +76,21 @@ class Run(QtGui.QMainWindow):
     def resizeEvent(self, event):
         width, height = event.size().width(), event.size().height()
         self.remakeLayout(width, height)
+
+    def colorModeChange(self, text):
+        if text == 'HSV':
+            self.colorMode = 'hsv'
+        elif text == 'HSV-Inverted':
+            self.colorMode = 'hsvI'
+        elif text == 'RGB (Intensity = B)':
+            self.colorMode = 'rgb'
+        self.colorSpace.colorMode = self.colorMode
+        self.mipViews.colorMode = self.colorMode
+        if self.mipViews.filename:
+            self.mipViews.createMappedMip()
+            self.colorSpace.createColorSpaceView()
+            self.colorSpace.updateColorSpaceView()
+            self.colorSpace.createValidityMap()
 
     def maps2LawrenceStart(self):
         if not self.mipViews.filename:
@@ -122,9 +143,11 @@ class Run(QtGui.QMainWindow):
         self.ui.neuronsDoneButton.move(ax, ay - self.ui.neuronsDoneButton.height() - 5)
         self.ui.mipDynamic.resize(side, side)
         x += side + 10
-        bside, bseparation = side * .07, side * .1
+        bside, bseparation = side * .08, side * .1
         self.ui.editImageButton.move(x, y)
         self.ui.editImageButton.resize(bside, bside)
+        self.ui.editImageButton.setIcon(self.toolIcon)
+        self.ui.editImageButton.setIconSize(QtCore.QSize(bside, bside))
         y += bseparation * 2
         self.ui.plusZoom.move(x, y)
         self.ui.plusZoom.resize(bside, bside)
@@ -133,49 +156,29 @@ class Run(QtGui.QMainWindow):
         self.ui.minusZoom.resize(bside, bside)
         # mode and volume controls
         y = int(height * .12)
-        self.ui.modeMenu.move(int(width * .03), y)
+        x = int(width * .03)
+        self.ui.colorMenu.move(x, y)
+        x += self.ui.colorMenu.width() + 5
+        self.ui.drawMenu.move(x, y)
         x = int(width * .25)
         self.ui.volumeLabel.move(x, y)
         x += self.ui.volumeLabel.width() + 5
         self.ui.volumeSelect.move(x, y)
         x += self.ui.volumeSelect.width() + 5
         self.ui.deleteVolume.move(x, y)
+        vsh =self.ui.volumeSelect.height() * .9
+        self.ui.deleteVolume.resize(vsh, vsh)
         y = height / 4 - 20
         side = height * .4
         self.ui.colorSpaceLabel.move(20, y)
         self.ui.colorSpaceLabel.resize(side, 20)
         y = height / 4
-        '''
-        scale = float(side) / self.ui.colorSpace.width()
-        for i in xrange(0, len(self.colorSpace.volumes)): # [areas, viewpoints, drawingareas, currentarea]
-            if type(self.colorSpace.volumes[i]) is bool:
-                continue
-            for ii in xrange(0, len(self.colorSpace.volumes[i][0])): # [area, area]
-                if type(self.colorSpace.volumes[i][0]) is bool:
-                    continue
-                for iii in xrange(0, len(self.colorSpace.volumes[i][0][ii][0])):  # [x, y]
-                    self.colorSpace.volumes[i][0][ii][0][iii] *= scale
-                for iii in xrange(0, len(self.colorSpace.volumes[i][0][ii][1])):  # [x, y]
-                    self.colorSpace.volumes[i][0][ii][1][iii] *= scale
-            for ii in xrange(0, len(self.colorSpace.volumes[i][2])):  # [x, y]
-                if type(self.colorSpace.volumes[i][2][ii]) is bool:
-                    continue
-                for iii in xrange(0, len(self.colorSpace.volumes[i][2][ii][1])):
-                    self.colorSpace.volumes[i][2][ii][1][iii][0] *= scale
-                    self.colorSpace.volumes[i][2][ii][1][iii][1] *= scale
-            for ii in xrange(0, len(self.colorSpace.volumes[i][3])):
-                try:
-                    self.colorSpace.volumes[i][3][ii][0] *= scale
-                    self.colorSpace.volumes[i][3][ii][1] *= scale
-                except:
-                    print self.colorSpace.volumes[i][3][ii]
-        for i in xrange(0, len(self.colorSpace.currentArea)):
-            self.colorSpace.currentArea[i][0] *= scale
-            self.colorSpace.currentArea[i][1] *= scale
-        '''
         self.ui.colorSpace.move(20, y)
         self.ui.colorSpace.resize(side, side)
+        self.ui.plotButton.resize(bside, bside)
         self.ui.plotButton.move(20, y - self.ui.plotButton.height() - 5)
+        self.ui.plotButton.setIcon(self.cubeIcon)
+        self.ui.plotButton.setIconSize(QtCore.QSize(bside, bside))
         x = side + 30
         w = int(.02*width)
         self.ui.areaSelectionView.move(x, y - w/4)
@@ -194,15 +197,18 @@ class Run(QtGui.QMainWindow):
         self.ui.debugLabel.move(20, y)
         self.ui.debugLabel.resize((width / 2 - 100), (height - y - 50))
         self.ui.gpuLabel.move((width - self.ui.gpuLabel.width()), (height - self.ui.gpuLabel.height()))
-        # remake colorspace view if nothing is drawn (won't resize drawings)
-        if self.colorSpace.areas == [False] and self.colorSpace.volumes == [False]:
-            self.colorSpace.createColorSpaceView()
         # resize the mip views
         if self.mipViews.filename:
             self.mipViews.updateMipView()
-        self.ui.intensityLabel.setTextFormat(QtCore.Qt.PlainText)
+        # remake colorspace view if nothing is drawn (won't resize drawings)
+        if self.colorSpace.areas == [False] and len(self.colorSpace.volumes) == 1:
+            self.colorSpace.createColorSpaceView()
+            if self.mipViews.filename:
+                self.mipViews.createMappedMip()
+                self.colorSpace.createValidityMap()
+        # self.ui.intensityLabel.setTextFormat(QtCore.Qt.PlainText)
         if side > 400:  # change size of node drawn in colorSpace
-            self.colorSpace.nodeSize = [int(-1 * side / 130), int((side / 130) + 1)]
+            self.colorSpace.nodeSize = [int(-1 * side / 145), int((side / 145) + 1)]
         self.colorSpace.createAreaView()
 
     def keyPressEvent(self, event):
@@ -285,6 +291,9 @@ class Run(QtGui.QMainWindow):
                     self.colorSpace.circularCreate()
                     self.colorSpace.createAreaView()
                     self.colorSpace.createValidityMap()
+            elif self.colorSpace.areaMode == 'sector' and event.type() == QtCore.QEvent.MouseButtonPress:
+                pos = event.pos()
+                self.colorSpace.sectorFromMip([pos.x(), pos.y(), self.colorSpace.csImageVal])
         elif source == self.ui.areaSelectionView.viewport() and event.type()\
                 == QtCore.QEvent.MouseButtonPress:
             pos = event.pos()
@@ -295,7 +304,10 @@ class Run(QtGui.QMainWindow):
                 self.mipViews.getNeuronLocation(pos.x(), pos.y(), True)
             else:
                 xyv = self.mipViews.getNeuronLocation(pos.x(), pos.y())
-                self.colorSpace.circularFromMip(xyv)
+                if self.colorMode == 'rgb':
+                    self.colorSpace.circularFromMip(xyv)
+                else:
+                    self.colorSpace.sectorFromMip(xyv)
         if event.type() == QtCore.QEvent.MouseButtonPress:
             self.debugLog()
         return False

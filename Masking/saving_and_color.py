@@ -54,7 +54,7 @@ def saveMIP(validityMap, mappedMip, data, size): #####################fix this. 
     QtGui.QApplication.processEvents()
 
 
-def applyToStack(xyvMaps, size, opendirectory, boundsinclude):
+def applyToStack(xyvMaps, size, opendirectory, boundsinclude, colorMode):
     # initiate a progress bar
     bar = QtGui.QProgressBar()
     bar.setWindowTitle(QtCore.QString('Applying Mask to Stack...'))
@@ -119,7 +119,8 @@ def applyToStack(xyvMaps, size, opendirectory, boundsinclude):
         else:
             [bounds, include] = boundsinclude
             rgb = rgbCorrection(original.astype(np.float32), bounds, False, include)  # apply correction to rgb
-        xyv = rgbtoxyv(rgb, radius)
+        if colorMode != 'rgb':
+            xyv = rgbtoxyv(rgb, radius, colorMode)
         height, width, numcolors = original.shape
         original = original.reshape((height * width), numcolors)
         if numcolors == 3:
@@ -134,7 +135,7 @@ def applyToStack(xyvMaps, size, opendirectory, boundsinclude):
                 yshift = py * width
                 for px in xrange(0, width):
                     [x, y, v] = xyv[0][py][px], xyv[1][py][px], xyv[2][py][px]
-                    if not map[v, x, y]:
+                    if not map[v][x][y]:
                         indices.append((yshift + px))
             cropped[indices] = black  # set pixels to black
             cropped = cropped.reshape(height, width, numcolors)  # reshape back to normal
@@ -238,23 +239,26 @@ def rgbCorrection(img, bounds, gpuMode, include):
     img = img.astype(np.uint8)
     return img
 
-
-
-def rgbtoxyv(rgb, radius):
+def rgbtoxyv(rgb, radius, colorMode):
     hsv = cv2.cvtColor(rgb, cv2.COLOR_RGB2HSV_FULL)
     # hsv = [0-255, 0-255, 0-255]
     h, s, v = hsv[:, :, 0], hsv[:, :, 1], hsv[:, :, 2]
     h = h.astype(np.float32)
     h *= 0.024639942381096416  # convert h from 255 to radians
-    s = 255 - s
+    if colorMode == 'hsvI':
+        radius *= 0.8
+        '''if radius > 128:
+            radius = 128'''
+    elif colorMode == 'hsv':
+        s = 255 - s
     s = s.astype(np.float32)
     s /= 255
     x = (s * np.cos(h) + 1) * radius  # set x
     y = (1 - s * np.sin(h)) * radius  # set y
     realSideMax = radius * 2 - 1
-    x = x.astype(np.uint8)
+    x = x.astype(np.uint16)
     x[x > realSideMax] = realSideMax
-    y = y.astype(np.uint8)
+    y = y.astype(np.uint16)
     y[y > realSideMax] = realSideMax
     #xyv = np.zeros((hsv.shape[0], hsv.shape[1], 3))
     #xyv[:, :, 0], xyv[:, :, 1], xyv[:, :, 2] = x, y, v
