@@ -159,6 +159,14 @@ class Correction(QtGui.QMainWindow):
         if not self.filename:  # nothing was imported
             return
         if self.alignMode:  # ready to be aligned
+            # push new labels
+            self.ui.thresholdMode.setChecked(False)
+            self.ui.thresholdMode.setVisible(False)
+            self.ui.afterLabel.setText(QtCore.QString('After Normalizing and Aligning'))
+            self.ui.alignButton.setText(QtCore.QString('Unalign'))
+            self.alignMode = False
+            self.ui.channelSelectMenu.setVisible(False)
+            QtGui.QApplication.processEvents()
             '''# initiate a progress bar
             bar = QtGui.QProgressBar()
             bar.setWindowTitle(QtCore.QString('Aligning Images'))
@@ -201,13 +209,7 @@ class Correction(QtGui.QMainWindow):
             for datum in thresholdedAligned:
                 threshAImages.append(self.array16ToQImage(datum))
             self.alignedImages.append(threshAImages)'''
-            # push to views and labels
-            self.ui.thresholdMode.setChecked(False)
-            self.ui.thresholdMode.setVisible(False)
-            self.ui.afterLabel.setText(QtCore.QString('After Normalizing and Aligning'))
-            self.ui.alignButton.setText(QtCore.QString('Unalign'))
-            self.alignMode = False
-            self.ui.channelSelectMenu.setVisible(False)
+            # push view
             self.drawAfterView()
             '''bar.close()'''
         else:  # already aligned, so redraw unaligned images
