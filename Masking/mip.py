@@ -48,11 +48,11 @@ class mips():
         [xi, yi, xf, yf] = self.croparea
         width, height = xf - xi, yf - yi
         px, py = int(fracMx * width + xi), int(fracMy * height + yi)
-        xFull, yFull, vFull = self.mappedMip
-        cx, cy, cv = xFull[py][px], yFull[py][px], vFull[py][px]
+        cx, cy, cv = self.mappedNumpyMip[py][px]
         # get array of this square around it in 5x5 pixel fashion
         r = 5
-        x, y, v = xFull[(py - r):(py + r), (px - r):(px + r)], yFull[(py - r):(py + r), (px - r):(px + r)], vFull[(py - r):(py + r), (px - r):(px + r)]
+        cropped = self.mappedNumpyMip[(py - r):(py + r), (px - r):(px + r)]
+        x, y, v = cropped[:, :, 0], cropped[:, :, 1], cropped[:, :, 2]
         dxy = self.colorSpace.width() / 20
         x[abs(x - cx) > dxy] = cx
         y[abs(y - cy) > dxy] = cy
@@ -160,7 +160,10 @@ class mips():
             self.mappedMip = [self.originalImage[:, :, 0].copy(),
                 self.originalImage[:, :, 1].copy(), self.originalImage[:, :, 2].copy()]
         else:
-            self.mappedMip = saving_and_color.rgbtoxyv(self.originalImage, radius, self.colorMode)
+            if self.gpuMode and False:  # we are not ready for this (using NumpyMip) yet
+                self.mappedNumpyMip = saving_and_color.rgb2xyv(self.originalImage, radius, self.colorMode, only='Numpy')
+            else:
+                self.mappedMip, self.mappedNumpyMip = saving_and_color.rgb2xyv(self.originalImage, radius, self.colorMode, only=False)
         b = time.time()
         print 'elapsed time for creating MappedMip ms:', (b-a)*1000
 
@@ -208,17 +211,16 @@ class mips():
                 yshift = py * width
                 for px in xrange(0, width):
                     [x, y, v] = self.mappedMip[0][py][px], self.mappedMip[1][py][px], self.mappedMip[2][py][px]
-                    if not self.validityMap[v][x][y]:
+                    if not self.validityMap[v, x, y]:
                         indices.append((yshift + px))
         else:
-            print len(self.validityMap), len(self.validityMap[0])
             for py in xrange(0, height):  # apply validityMap (mask) to image scaled to dynamicView
                 yshift = py * width
                 mx = xi
                 for px in xrange(0, width):
                     rmx, rmy = int(round(mx)), int(round(my))
-                    [x, y, v] = self.mappedMip[0][rmy][rmx], self.mappedMip[1][rmy][rmx], self.mappedMip[2][rmy][rmx]
-                    if not self.validityMap[v][x][y]:
+                    [x, y, v] = self.mappedMip[rmy][rmx]
+                    if not self.validityMap[v, x, y]:
                         indices.append((yshift + px))
                     mx += fracw
                 my += frach

@@ -54,7 +54,7 @@ def saveMIP(validityMap, mappedMip, data, size): #####################fix this. 
     QtGui.QApplication.processEvents()
 
 
-def applyToStack(xyvMaps, size, opendirectory, boundsinclude, colorMode):
+def applyToStack(maps, size, opendirectory, boundsinclude, colorMode):
     # initiate a progress bar
     bar = QtGui.QProgressBar()
     bar.setWindowTitle(QtCore.QString('Applying Mask to Stack...'))
@@ -85,7 +85,7 @@ def applyToStack(xyvMaps, size, opendirectory, boundsinclude, colorMode):
         return
     files = [y for (x, y) in sorted(zip(fileIndices, files))]
     # update progress bar configuration
-    bar.setMaximum(((len(files) + 2) * len(xyvMaps)))
+    bar.setMaximum(((len(files) + 2) * len(maps))) ######################### deal with rgb maps
     progress = 0
     bar.show()
     QtGui.QApplication.processEvents()
@@ -93,13 +93,18 @@ def applyToStack(xyvMaps, size, opendirectory, boundsinclude, colorMode):
     saveDirectory = opendirectory + '/maskedTIFs'
     saveDilatedDir = saveDirectory + '/Dilated/'
     saveUndilatedDir = saveDirectory + '/Undilated/'
-    saveDilatedStackDir = saveDilatedDir + 'Stack/'
-    saveUndilatedStackDir = saveUndilatedDir + 'Stack/'
-    for path in [saveDirectory, saveDilatedDir, saveUndilatedDir,
-                 saveDilatedStackDir, saveUndilatedStackDir]:
+    # saveDilatedStackDir = saveDilatedDir + 'Stack/'
+    # saveUndilatedStackDir = saveUndilatedDir + 'Stack/'
+    numMaps = len(maps)
+    for path in [saveDirectory, saveDilatedDir, saveUndilatedDir]:
         if not os.path.exists(path):
             os.makedirs(path)
-    numpystacks = [[] for x in xrange(0, len(xyvMaps))]  # [Color[Stack]]
+    for dir in [saveDilatedDir, saveUndilatedDir]:
+        for color in xrange(0, numMaps):
+            path = dir + ('Color%d/' % (color+1))
+            if not os.path.exists(path):
+                os.makedirs(path)
+    numpystacks = [[] for x in xrange(0, numMaps)]  # [Color[Stack]]
     originalStack = []
     radius = size / 2
     for filenum, file in enumerate(files):
@@ -118,29 +123,29 @@ def applyToStack(xyvMaps, size, opendirectory, boundsinclude, colorMode):
             rgb = rgb.astype(np.uint8)
         else:
             [bounds, include] = boundsinclude
-            rgb = rgbCorrection(original.astype(np.float32), bounds, False, include)  # apply correction to rgb
+            mappedImage = rgbCorrection(original.astype(np.float32), bounds, False, include)  # apply correction to rgb
         if colorMode != 'rgb':
-            xyv = rgbtoxyv(rgb, radius, colorMode)
+            mappedImage = rgb2xyv(rgb, radius, colorMode)
         height, width, numcolors = original.shape
         original = original.reshape((height * width), numcolors)
         if numcolors == 3:
             black = [0, 0, 0]
         elif numcolors == 4:
             black = [0, 0, 0, 255]
-        for color, map in enumerate(xyvMaps):
+        for color, map in enumerate(maps):
             # process the array
             cropped = original.copy()  # what is to be saved
             indices = []
             for py in xrange(0, height):
                 yshift = py * width
                 for px in xrange(0, width):
-                    [x, y, v] = xyv[0][py][px], xyv[1][py][px], xyv[2][py][px]
-                    if not map[v][x][y]:
+                    [a, b, c] = mappedImage[py][px]
+                    if not map[a][b][c]:
                         indices.append((yshift + px))
             cropped[indices] = black  # set pixels to black
             cropped = cropped.reshape(height, width, numcolors)  # reshape back to normal
             # save the array as tif
-            tifffile.imsave((saveUndilatedStackDir + ('Color%d_' % (color+1)) + file), cropped)
+            tifffile.imsave((saveUndilatedDir + ('Color%d/' % (color+1)) + file), cropped)
             # save the numpy array into numpystack
             numpystacks[color].append(cropped.copy())
             # update progressbar
@@ -148,7 +153,7 @@ def applyToStack(xyvMaps, size, opendirectory, boundsinclude, colorMode):
             bar.setValue(progress)
             bar.setWindowTitle(QtCore.QString('Applying Mask to Stack...to Z-Layer %d Color %d' % (filenum+1, color+2)))
             QtGui.QApplication.processEvents()
-    for color in xrange(0, len(xyvMaps)):
+    for color in xrange(0, numMaps):
         bar.setWindowTitle(QtCore.QString('Creating MIP for Color %d' % (color+1)))
         QtGui.QApplication.processEvents()
         mip = np.maximum.reduce(numpystacks[color])
@@ -168,22 +173,22 @@ def applyToStack(xyvMaps, size, opendirectory, boundsinclude, colorMode):
         bar.setWindowTitle(QtCore.QString('Dilating Color %d and Saving Stack with MIP' % (color + 1)))
         QtGui.QApplication.processEvents()
         dilated3DMask = ndimage.binary_dilation(image, structure=dilationStruct)
-        # the following median filter is in beta #########################
+        '''# the following median filter is in beta #########################
         for x in xrange(0, 2):
             dilated3DMask = median_filter(dilated3DMask, size=(3, 3, 3))  # this is in beta
             dilated3DMask = ndimage.binary_dilation(dilated3DMask, structure=dilationStruct)
         dilated3DMask = ndimage.binary_dilation(dilated3DMask, structure=dilationStruct)
-        # end beta #######################################################
+        # end beta #######################################################'''
         dilated3DMask = np.expand_dims(dilated3DMask, axis=3)
         dilated3DMask = np.repeat(dilated3DMask, originalStack[0].shape[2], axis=3)
         # dilated3DMask = dilated3DMask.astype(np.uint16)
         dilatedStack = []
         for layer, file in enumerate(files):
             dilatedImage = dilated3DMask[layer] * originalStack[layer]
-            dilatedImage = median_filter(dilatedImage, size=(3, 3, 1))  # this is in beta
+            # dilatedImage = median_filter(dilatedImage, size=(3, 3, 1))  # this is in beta
             # dilatedImage = cv2.bitwise_and(originalStack[layer], originalStack[layer], mask=dilated3DMask[layer])  # dilated3DMask[layer] * originalStack[layer]
             dilatedStack.append(dilatedImage)
-            tifffile.imsave((saveDilatedStackDir + ('Dilated_Color%d_' % (color+1)) + file), dilatedImage)
+            tifffile.imsave((saveDilatedDir + ('Color%d/' % (color+1)) + file), dilatedImage)
         dilatedMip = np.maximum.reduce(dilatedStack)
         # print 'comparison of the 2 MIPs:', (dilatedMip==mip).all()
         tifffile.imsave((saveDilatedDir + ('MIP_Dilated_Color%d' % (color+1)) + '.tif'), dilatedMip)
@@ -216,7 +221,6 @@ def rgbCorrection(img, bounds, gpuMode, include):
                 overmid[ii] *= (float(maximum - predictedMid) / (f - m))
                 overmid[ii] += predictedMid
             overmid = np.array(overmid)
-            overmid = overmid.reshape(height, width)
         else:
             overmid = ((overmid-m) * (float(maximum - predictedMid) / (f - m))) + predictedMid
         overmid *= overmidmask
@@ -228,18 +232,20 @@ def rgbCorrection(img, bounds, gpuMode, include):
                 undermid[ii] -= i
                 undermid[ii] *= (float(predictedMid - i) / (m - i))
             undermid = np.array(undermid)
-            undermid = undermid.reshape(height, width)
         else:
             undermid -= i
             undermid *= (float(predictedMid - i) / (m - i))
         undermid *= undermidmask
+        if gpuMode:
+            overmid = overmid.reshape(height, width)
+            undermid = undermid.reshape(height, width)
         color = undermid + overmid
         img[:, :, c] = color
     img /= 256
     img = img.astype(np.uint8)
     return img
 
-def rgbtoxyv(rgb, radius, colorMode):
+def rgb2xyv(rgb, radius, colorMode, only='Python'):
     hsv = cv2.cvtColor(rgb, cv2.COLOR_RGB2HSV_FULL)
     # hsv = [0-255, 0-255, 0-255]
     h, s, v = hsv[:, :, 0], hsv[:, :, 1], hsv[:, :, 2]
@@ -260,10 +266,14 @@ def rgbtoxyv(rgb, radius, colorMode):
     x[x > realSideMax] = realSideMax
     y = y.astype(np.uint16)
     y[y > realSideMax] = realSideMax
-    #xyv = np.zeros((hsv.shape[0], hsv.shape[1], 3))
-    #xyv[:, :, 0], xyv[:, :, 1], xyv[:, :, 2] = x, y, v
-    xyv = [x, y, v]
-    return xyv
+    xyvNumpy = np.zeros((hsv.shape[0], hsv.shape[1], 3), dtype=np.uint16)
+    xyvNumpy[:, :, 0], xyvNumpy[:, :, 1], xyvNumpy[:, :, 2] = x, y, v
+    if only == 'Numpy':
+        return xyvNumpy
+    xyv = xyvNumpy.tolist()
+    if only == 'Python':
+        return xyv
+    return xyv, xyvNumpy
 
 
 def hsvtoxyv(hsv, radius):

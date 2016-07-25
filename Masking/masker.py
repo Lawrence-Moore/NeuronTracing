@@ -29,7 +29,7 @@ class Run(QtGui.QMainWindow):
         try:
             af.info()
             self.ui.gpuLabel.setText(QtCore.QString('GPU: ON'))
-            self.gpuMode = True
+            self.gpuMode = False  # True ################## debug this!
         except:
             self.gpuMode = False
         # make icons from files
@@ -69,7 +69,7 @@ class Run(QtGui.QMainWindow):
         self.ui.applyStackButton.released.connect(self.savingStack)
         self.ui.editImageButton.released.connect(self.mipViews.editImage)
         self.ui.plotButton.released.connect(self.colorSpace.plotSpace)
-        self.ui.maps2LawrenceButton.released.connect(self.maps2LawrenceStart)
+        self.ui.maps2ClusteringButton.released.connect(self.maps2LawrenceStart)
         self.ui.neuronsDoneButton.setVisible(False)
         self.ui.neuronsDoneButton.released.connect(self.maps2LawrenceFinish)
 
@@ -92,7 +92,7 @@ class Run(QtGui.QMainWindow):
             self.colorSpace.updateColorSpaceView()
             self.colorSpace.createValidityMap()
 
-    def maps2LawrenceStart(self):
+    def maps2ClusteringStart(self):
         if not self.mipViews.filename:
             return
         dialog = QtGui.QMessageBox(self)
@@ -103,13 +103,15 @@ class Run(QtGui.QMainWindow):
         self.mipViews.neuronLocating = True
         self.mipViews.updateMipView()
 
-    def maps2LawrenceFinish(self):
+    def maps2ClusteringFinish(self):
         self.mipViews.neuronLocating = False
         self.ui.neuronsDoneButton.setVisible(False)
         neuronsList = copy.copy(self.mipViews.selectedNeurons)
-        # do stuff with list of neuronsList
-        # maps = self.colorSpace.saveStack(saving=False)
-        # copy.copy(self.mipViews.boundsInclude)
+        radius = self.colorSpace.side / 2
+        maps = self.colorSpace.saveStack(saving=False)
+        # copy.copy(self.mipViews.boundsInclude) this is for image correction
+        # do stuff with variables above
+        # clean up:
         self.mipViews.selectedNeurons = []
         self.mipViews.updateMipView()
 
@@ -200,15 +202,13 @@ class Run(QtGui.QMainWindow):
         # resize the mip views
         if self.mipViews.filename:
             self.mipViews.updateMipView()
-        # remake colorspace view if nothing is drawn (won't resize drawings)
-        if self.colorSpace.areas == [False] and len(self.colorSpace.volumes) == 1:
-            self.colorSpace.createColorSpaceView()
-            if self.mipViews.filename:
-                self.mipViews.createMappedMip()
-                self.colorSpace.createValidityMap()
-        # self.ui.intensityLabel.setTextFormat(QtCore.Qt.PlainText)
         if side > 400:  # change size of node drawn in colorSpace
             self.colorSpace.nodeSize = [int(-1 * side / 145), int((side / 145) + 1)]
+        self.colorSpace.createColorSpaceView()
+        if self.mipViews.filename:
+            self.mipViews.createMappedMip()
+        self.colorSpace.rescaleCurrentArea()
+        # self.ui.intensityLabel.setTextFormat(QtCore.Qt.PlainText)
         self.colorSpace.createAreaView()
 
     def keyPressEvent(self, event):
