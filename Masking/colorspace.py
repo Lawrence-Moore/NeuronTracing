@@ -111,7 +111,7 @@ class colorSpaces():
     def sectorFromMip(self, xyv):
         self.currentArea = []
         [x, y, v] = xyv
-        self.intensitySlider.setValue(v)
+        self.silentSliderSet(v)
         center = self.side / 2
         self.currentArea.append([center, center])
         x -= center
@@ -284,7 +284,8 @@ class colorSpaces():
             self.updateColorSpaceView(False)  # remove drawings from view
             self.currentArea[self.manualSelected] = [x, y]  # move to mouse
             # resave area and drawing information
-            self.drawingAreas[self.indexArea] = ('manual', copy.copy(self.currentArea))
+            self.drawingAreas[self.indexArea] = ['manual']
+            self.packCurrentArea2DrawingAreas()
             # redraw points and lines in polygon
             previous = self.currentArea[0]
             newarea = [previous]
@@ -307,12 +308,15 @@ class colorSpaces():
         mapping in createValidityMap and save in self.areas, creates new
         mapping with area and pushes to colorspace view
         '''
-        areaX = []
-        areaY = []
-        for [x, y] in newarea:
-            areaX.append(x)
-            areaY.append(y)
+        newarea = np.array(newarea, dtype=np.float32)
+        newarea /= self.side
+        areaX, areaY = newarea[:, 0], newarea[:, 1]
         self.areas[self.indexArea] = (areaX, areaY, copy.copy(self.csImageVal))
+
+    def packCurrentArea2DrawingAreas(self):
+        drawingArea = np.array(self.currentArea, dtype=np.float32)
+        drawingArea /= self.side
+        self.drawingAreas[self.indexArea].append(drawingArea)
 
     def finalizeBoundary(self):
         '''
@@ -321,7 +325,8 @@ class colorSpaces():
         '''
         if len(self.currentArea) == 0:  # shouldn't be called in this case
             return  # but it fixed somethings
-        self.drawingAreas[self.indexArea] = ('auto', copy.copy(self.currentArea))
+        self.drawingAreas[self.indexArea] = ['auto']
+        self.packCurrentArea2DrawingAreas()
         newarea = []
         self.intersection = False  # there is an intersection in drawn polygon
         def drawlines():
@@ -381,7 +386,7 @@ class colorSpaces():
         # add to self.areas and update dynamicview:
         self.boundaryToAreas(newarea)
 
-    def updateColorSpaceView(self, redraw=True):
+    def updateColorSpaceView(self, redraw=True, forced=False):
         '''
         :param redraw: bool: if the currentArea should be redrawn and/or pushed
         to the view
@@ -399,10 +404,8 @@ class colorSpaces():
         # create transparent mask for drawing new areas on
         self.currentImage.fill(QtGui.qRgba(0, 0, 0, 0))
         if redraw:  # redraw drawing areas
-            if self.areas[self.indexArea]:
+            if self.currentArea:
                 # change v value at current area in self.area history
-                (x, y, v) = self.areas[self.indexArea]
-                self.areas[self.indexArea] = (x, y, copy.copy(self.csImageVal))
                 if self.areaMode == 'auto':
                     self.finalizeBoundary()
                 elif self.areaMode == 'manualUpdate':
@@ -410,7 +413,7 @@ class colorSpaces():
                     self.updateManualBoundary(x, y, False)
                 elif self.areaMode == 'manualCreate':
                     pass  # should be clearing self.currentArea and trashing old stuff######
-                if not (len(self.areas) == 1 or (len(self.areas) == 2 and not self.areas[1])):
+                if forced or not (len(self.areas) == 1 or (len(self.areas) == 2 and not self.areas[1])):
                     self.createValidityMap()
             self.drawColorSpaceView()
         self.createAreaView()
@@ -546,29 +549,32 @@ class colorSpaces():
         if self.areaMode == 'manualUpdate':
             self.areaMode = 'manualCreate'
 
+    def silentSliderSet(self, v):
+        self.intensitySlider.blockSignals(True)
+        self.intensitySlider.setValue(v)
+        self.intensitySlider.blockSignals(False)
+
     def getPreviousArea(self, px, py):
         for i, selection in enumerate(self.areaViewPoints):
             for [x, y] in selection:
                 if px == x and py == y:
                     self.indexArea = i
                     self.createAreaView()
-                    (type, area) = self.drawingAreas[self.indexArea]
-                    self.intensitySlider.setValue(self.areas[self.indexArea][2])
-                    self.currentArea = area
+                    type = self.drawingAreas[self.indexArea][0]
+                    self.silentSliderSet(self.areas[self.indexArea][2])
                     if type == 'manual':
                         self.areaMode = 'manualUpdate'
                         self.manualSelected = 0
-                        self.updateManualBoundary(area[0][0], area[0][1], False)
                     elif type == 'auto':
                         self.areaMode = 'auto'
-                        self.finalizeBoundary()
+                    self.rescaleCurrentArea()
                     return
 
     def volumeChange(self, text):
         self.addArea()
         self.volumes[self.indexVolume] = [copy.deepcopy(self.areas),
         copy.deepcopy(self.areaViewPoints), copy.deepcopy(self.drawingAreas),
-                                          copy.deepcopy(self.currentArea)]
+                                          copy.copy(self.indexArea)]
         self.indexVolume = self.volumeMenu.currentIndex()
         if text == 'Add Volume...':
             self.volumes.append([])
@@ -578,7 +584,8 @@ class colorSpaces():
             self.currentArea, self.indexArea, self.manualSelected = [], 0, -1
         else:
             [self.areas, self.areaViewPoints, self.drawingAreas,
-                        self.currentArea] = self.volumes[self.indexVolume]
+                        self.indexArea] = self.volumes[self.indexVolume]
+            self.currentArea = self.drawingAreas[self.indexArea][1]
         self.refreshAreaSpace()
         self.createValidityMap()
 
@@ -595,7 +602,8 @@ class colorSpaces():
         if self.indexVolume != 0:
             self.indexVolume -= 1  # move for appearance + not stuck at end
         self.volumeMenu.setCurrentIndex(self.indexVolume)
-        [self.areas, self.areaViewPoints, self.drawingAreas, self.currentArea] = self.volumes[self.indexVolume]
+        [self.areas, self.areaViewPoints, self.drawingAreas, self.indexArea] = self.volumes[self.indexVolume]
+        self.currentArea = self.drawingAreas[self.indexArea][1]
         self.refreshAreaSpace()
         self.createValidityMap()
 
@@ -639,31 +647,33 @@ class colorSpaces():
         self.areaView.show()
         del img
 
+    def rescaleAreaXY(self, aX, aY):
+        if self.colorMode == 'rgb':
+                    scale = 256
+        else:
+            scale = self.side
+        aX, aY = aX * scale, aY * scale
+        aX, aY = aX.astype(np.uint16), aY.astype(np.uint16)
+        return aX, aY
+
     def createValidityMap(self, push=True):  #vxy
         a = time.time()
         if push:
             self.volumes[self.indexVolume] = [copy.deepcopy(self.areas),
             copy.deepcopy(self.areaViewPoints), copy.deepcopy(self.drawingAreas),
-                                          copy.deepcopy(self.currentArea)]
+                                          copy.copy(self.indexArea)]
         else:
             self.areas = self.volumes[self.indexVolume][0]
-        self.validityMap = [[[False for x in xrange(0, self.side)] for x in xrange(0, self.side)] for x in xrange(0, 256)]
+        self.validityMap = np.zeros(shape=(256, self.side, self.side), dtype=bool)
         if not self.areas[0]:
             self.validityMap = False
             self.updateDynamic(self.validityMap)
             return
         if len(self.areas) == 1 or (len(self.areas) == 2 and not self.areas[1]):
             (areaX, areaY, maxv) = self.areas[0]
-            if self.colorMode == 'rgb':
-                # map should be in [b, r, g] format
-                # right now, [b, r, g] == [v, x, y] from self.createColorSpace
-                # self.createValidityMap creates in [v, x, y] format
-                areaX, areaY = np.array(areaX, dtype=np.uint16), np.array(areaY, dtype=np.uint16)
-                ratio = 256. / self.side
-                areaX, areaY = np.multiply(areaX, ratio), np.multiply(areaY, ratio)
-                areaX, areaY = areaX.astype(np.uint16), areaY.astype(np.uint16)
-                areaX, areaY = areaX.tolist(), areaY.tolist()
-            plane = [[False for x in xrange(0, self.side)] for x in xrange(0, self.side)]
+            areaX, areaY = self.rescaleAreaXY(areaX, areaY)
+            plane = np.zeros(shape=(self.side, self.side), dtype=bool)
+            areaX, areaY = areaX.tolist(), areaY.tolist()
             for i, x in enumerate(areaX):
                 try:
                     if areaX[i + 1] == x:  # duplicate
@@ -675,33 +685,28 @@ class colorSpaces():
                 except:
                     continue
                 if areaY[inew] > areaY[i]:
-                    plane[x][areaY[i]:areaY[inew]] = [True] * (areaY[inew] - areaY[i])
+                    plane[x][areaY[i]:areaY[inew]] = True
                 else:
-                    plane[x][areaY[inew]:areaY[i]] = [True] * (areaY[i] - areaY[inew])
-            self.validityMap[0:256] = [plane] * 256
+                    plane[x][areaY[inew]:areaY[i]] = True
+            self.validityMap[0:256] = plane
             if push:
                 b = time.time()
                 print 'time to create validityMap', 1000*(b-a)
                 self.updateDynamic(self.validityMap)
             return
         # complex drawings:
-        ind = [] # indices in self.areas
-        indvs = [] # and there corresponding v-values
-        areaDicts = [] # mini, minv
+        ind = []  # indices in self.areas
+        indvs = []  # and there corresponding v-values
+        areaDicts = []  # mini, minv
         for i, area in enumerate(self.areas):  # preprocessing areas into dicts
             if area:
-                ind.append(i) # make orderedareas
-                indvs.append(area[2]) # make orderedareas
+                ind.append(i)  # make orderedareas
+                indvs.append(area[2])  # make orderedareas
                 dict = {}
                 minx = self.side
                 maxx = 0
                 areaX, areaY = area[0], area[1]
-                if self.colorMode == 'rgb':
-                    areaX, areaY = np.array(areaX, dtype=np.uint16), np.array(areaY, dtype=np.uint16)
-                    ratio = 256. / self.side
-                    areaX, areaY = np.multiply(areaX, ratio), np.multiply(areaY, ratio)
-                    areaX, areaY = areaX.astype(np.uint16), areaY.astype(np.uint16)
-                    areaX, areaY = areaX.tolist(), areaY.tolist()
+                areaX, areaY = self.rescaleAreaXY(areaX, areaY)
                 for (x, y) in sorted(zip(areaX, areaY)):  # sort by the x's
                     if x in dict:  # append like [min, max]
                         if len(dict[x]) == 2:
@@ -750,12 +755,16 @@ class colorSpaces():
                     [lowYmin, lowYmax] = areaDicts[lowI][lowX] # get min max
                     avgYmin = int(highYmin * fracV + lowYmin * ofracV)
                     avgYmax = int(highYmax * fracV + lowYmax * ofracV) + 1
-                    self.validityMap[v][avgX][avgYmin:avgYmax] = [True] * (avgYmax - avgYmin)
+                    self.validityMap[v][avgX][avgYmin:avgYmax] = True
             [lowI, lowV] = [highI, highV]
         b = time.time()
         if push:
             self.updateDynamic(self.validityMap)
         print 'time to create validityMap ms:', (b-a) * 1000
+        # notes about rgb:
+        # map should be in [b, r, g] format
+        # right now, [b, r, g] == [v, x, y] from self.createColorSpace
+        # self.createValidityMap creates in [v, x, y] format
 
     def plotSpace(self):
         if type(self.validityMap) is bool:
@@ -768,17 +777,6 @@ class colorSpaces():
             opendirectory = str(dialog.getExistingDirectory())
             if opendirectory == '':
                 return
-        '''# initiate a progress bar
-        bar = QtGui.QProgressBar()
-        bar.setWindowTitle(QtCore.QString('Creating Masks...'))
-        bar.setWindowModality(QtCore.Qt.WindowModal)
-        size = self.view.width()
-        bar.resize(size, size / 20)
-        bar.move(size, size)
-        currentProgress = 0
-        bar.setMaximum(len(self.volumes) * 2)
-        bar.show()
-        QtGui.QApplication.processEvents()'''
         originalIndex = self.indexVolume
         maps = []
         for i in xrange(0, len(self.volumes)):
@@ -787,18 +785,13 @@ class colorSpaces():
             if type(self.validityMap) == bool:
                 continue
             maps.append(self.validityMap.copy())
-            '''currentProgress += 1
-            bar.setValue(currentProgress)
-            QtGui.QApplication.processEvents()
-        bar.close()'''
         self.indexVolume = originalIndex
         [self.areas, self.areaViewPoints, self.drawingAreas,
-                        self.currentArea] = self.volumes[self.indexVolume]
+                        self.indexArea] = self.volumes[self.indexVolume]
         if saving:
-            saving_and_color.applyToStack(maps, self.view.width(), opendirectory, boundsinclude, self.colorMode)
+            saving_and_color.applyToStack(maps, self.view.width(), opendirectory, boundsinclude)
         else:
             return maps
-
 
     def getOriginalColorSpace(self, after, before):
         rgbMap = np.zeros((256, 256, 256), dtype=bool)
@@ -810,6 +803,18 @@ class colorSpaces():
                     rgbMap[r, g, b] = True
         return rgbMap
         # this will return an RGB validityMap
+
+    def rescaleCurrentArea(self):
+        if not self.drawingAreas[self.indexArea]:
+            return
+        self.currentArea = self.drawingAreas[self.indexArea][1]
+        self.currentArea *= self.side
+        self.currentArea = self.currentArea.astype(np.uint16)
+        self.currentArea = self.currentArea.tolist()
+        self.updateColorSpaceView(forced=True)
+
+
+
 
 
 
