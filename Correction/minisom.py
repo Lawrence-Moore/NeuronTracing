@@ -46,6 +46,7 @@ class MiniSom(object):
         self.sigma = sigma
         if weights is None:
             self.weights = self.random_generator.rand(x, y, input_len) * 2 - 1  # random initialization
+            print self.weights.shape
         else:
             self.weights = weights
         for i in range(x):
@@ -186,6 +187,7 @@ class MiniSom(object):
             winmap[self.winner(x)].append(x)
         return winmap
 
+    @staticmethod
     def cluster_colors(image, node_shape):
         pixels = reshape(image, (image.shape[0] * image.shape[1], 3))
 
@@ -198,3 +200,4 @@ class MiniSom(object):
         clustered = zeros(image.shape)
         for i, color in enumerate(qnt):
             clustered[unravel_index(i, dims=(image.shape[0], image.shape[1]))] = color
+        return clustered * (2**16 - 1)

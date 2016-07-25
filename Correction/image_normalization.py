@@ -418,24 +418,30 @@ def display_image(image):
     plt.show()
 
 
-def k_means(image, n_colors=64):
+def k_means(image, weights=None, n_colors=64):
     # works better with values between 0 and 1
-    image = np.array(image, dtype=np.float64) / (2**16 - 1)
+    image = np.array(image, dtype=np.float64) / (np.max(image))
 
     # reshape so it's 2-D
-    w, h, d = original_shape = tuple(image.shape)
+    w, h, d = tuple(image.shape)
     image_array = np.reshape(image, (w * h, d))
 
     # fit on sample
     image_array_sample = shuffle(image_array, random_state=0)[:1000]
-    kmeans = KMeans(n_clusters=n_colors, random_state=0).fit(image_array_sample)
+    if weights:
+        # reshape weights appropiately. Assumes a list of lists is passed in
+        weights = [np.array(weight) for weight in weights]
+        weights = np.vstack(tuple(weights))
+
+        # make sure it's on the 0-1 scale
+        weights = weights / (255) * (2**16 - 1)
+
+        kmeans = KMeans(n_clusters=n_colors, n_init=1, init=weights).fit(image_array_sample)
+    else:
+        kmeans = KMeans(n_clusters=n_colors, random_state=0).fit(image_array_sample)
 
     # Get labels for all points
     labels = kmeans.predict(image_array)
-
-    # randomely choose colors
-    codebook_random = shuffle(image_array, random_state=0)[:n_colors + 1]
-    labels_random = pairwise_distances_argmin(codebook_random, image_array, axis=0)
 
     def recreate_image(codebook, labels, w, h):
         """Recreate the (compressed) image from the code book & labels"""
@@ -447,6 +453,9 @@ def k_means(image, n_colors=64):
                 image[i][j] = codebook[labels[label_idx]]
                 label_idx += 1
         return image
+
+    quantized_image = recreate_image(kmeans.cluster_centers_, labels, w, h)
+
     plt.figure(1)
     plt.clf()
     ax = plt.axes([0, 0, 1, 1])
@@ -459,7 +468,11 @@ def k_means(image, n_colors=64):
     ax = plt.axes([0, 0, 1, 1])
     plt.axis('off')
     plt.title('Quantized image (64 colors, K-Means)')
-    plt.imshow(recreate_image(kmeans.cluster_centers_, labels, w, h))
+    plt.imshow(quantized_image)
+
+    # randomely choose colors
+    codebook_random = shuffle(image_array, random_state=0)[:n_colors + 1]
+    labels_random = pairwise_distances_argmin(codebook_random, image_array, axis=0)
 
     plt.figure(3)
     plt.clf()
@@ -470,7 +483,21 @@ def k_means(image, n_colors=64):
     plt.show()
 
 
-def self_organization_map(image, dim, weights, n_colors=64):
+def self_organizing_map(image, weights, n_colors=64, dim=None):
+    if dim is None:
+        # figure out a way to spread out the nodes of the som
+        # find the factor closest to the square root
+        factor = get_factor_closest_to_sqrt(len(weights))
+
+        # it's prime if the factor is 1
+        if factor == 1:
+            # add a random weight to make it even
+            weights = np.vstack((weights, np.random.random(3)))
+        # should be fine now
+        factor = get_factor_closest_to_sqrt(len(weights))
+        dim = (factor, len(weights) / factor)
+        weights = np.reshape(weights, (dim[0], dim[1], 3))
+
     pixels = np.reshape(image, (image.shape[0] * image.shape[1], 3))
 
     # determine the dimensions
@@ -484,6 +511,15 @@ def self_organization_map(image, dim, weights, n_colors=64):
         clustered[np.unravel_index(i, dims=(image.shape[0], image.shape[1]))] = q
 
     return clustered * (2 ** 16 - 1)
+
+
+def get_factor_closest_to_sqrt(number):
+    factor = int(sqrt(number))
+    isFactor = number % factor == 0
+    while not isFactor:
+        factor -= 1
+        isFactor = number % factor == 0
+    return factor
 
 
 def read_czi_file(file_name):

@@ -8,7 +8,7 @@ import os
 import math
 import re
 import time
-import arrayfire as af
+# import arrayfire as af
 
 
 def saveMIP(validityMap, mappedMip, data, size): #####################fix this. what is this even doing?

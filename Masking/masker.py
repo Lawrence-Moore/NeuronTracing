@@ -4,11 +4,15 @@ from mainwindow import Ui_MainWindow
 from colorspace import colorSpaces
 from mip import mips
 import time
-import arrayfire as af
+# import arrayfire as af
 import numpy as np
 from PIL import Image
 import saving_and_color
 import copy
+
+sys.path.append("../Correction")
+import minisom
+from image_normalization import k_means, self_organizing_map, display_image
 
 #print af.info()
 sys.setrecursionlimit(50000)  # for packaging into OSX
@@ -106,7 +110,17 @@ class Run(QtGui.QMainWindow):
     def maps2LawrenceFinish(self):
         self.mipViews.neuronLocating = False
         self.ui.neuronsDoneButton.setVisible(False)
+
+        # neurons list is xyz
         neuronsList = copy.copy(self.mipViews.selectedNeurons)
+        # k_means(self.mipViews.originalImage, neuronsList, n_colors=len(neuronsList))
+        weights = [np.array(weight) for weight in neuronsList]
+        weights = np.vstack(tuple(weights))
+
+        # make sure it's on the 0 - 1 scale
+        weights = weights.astype(float) / (255)
+        display_image(self_organizing_map(self.mipViews.originalImage, weights=weights, n_colors=len(weights)))
+
         # do stuff with list of neuronsList
         # maps = self.colorSpace.saveStack(saving=False)
         # copy.copy(self.mipViews.boundsInclude)

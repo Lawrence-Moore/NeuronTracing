@@ -2,7 +2,6 @@ from PyQt4 import QtGui, QtCore
 import time
 import numpy as np
 import cv2
-import arrayfire as af
 import saving_and_color
 import copy
 from PIL import Image
