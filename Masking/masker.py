@@ -69,9 +69,9 @@ class Run(QtGui.QMainWindow):
         self.ui.applyStackButton.released.connect(self.savingStack)
         self.ui.editImageButton.released.connect(self.mipViews.editImage)
         self.ui.plotButton.released.connect(self.colorSpace.plotSpace)
-        self.ui.maps2ClusteringButton.released.connect(self.maps2LawrenceStart)
+        self.ui.maps2ClusteringButton.released.connect(self.maps2ClusteringStart)
         self.ui.neuronsDoneButton.setVisible(False)
-        self.ui.neuronsDoneButton.released.connect(self.maps2LawrenceFinish)
+        self.ui.neuronsDoneButton.released.connect(self.maps2ClusteringFinish)
 
     def resizeEvent(self, event):
         width, height = event.size().width(), event.size().height()
@@ -104,6 +104,8 @@ class Run(QtGui.QMainWindow):
         self.mipViews.updateMipView()
 
     def maps2ClusteringFinish(self):
+        if not self.mipViews.filename:
+            return
         self.mipViews.neuronLocating = False
         self.ui.neuronsDoneButton.setVisible(False)
         neuronsList = copy.copy(self.mipViews.selectedNeurons)
@@ -140,8 +142,8 @@ class Run(QtGui.QMainWindow):
         self.ui.mipFull.move(x, y)
         self.ui.mipFull.resize(side, side)
         self.ui.mipDynamic.move(x, (height / 2))
-        ax, ay = x + side + 10, (height / 2) + side - self.ui.maps2LawrenceButton.height()
-        self.ui.maps2LawrenceButton.move(ax, ay)
+        ax, ay = x + side + 10, (height / 2) + side - self.ui.maps2ClusteringButton.height()
+        self.ui.maps2ClusteringButton.move(ax, ay)
         self.ui.neuronsDoneButton.move(ax, ay - self.ui.neuronsDoneButton.height() - 5)
         self.ui.mipDynamic.resize(side, side)
         x += side + 10
