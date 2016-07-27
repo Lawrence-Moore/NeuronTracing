@@ -29,7 +29,7 @@ class Run(QtGui.QMainWindow):
         try:
             af.info()
             self.ui.gpuLabel.setText(QtCore.QString('GPU: ON'))
-            self.gpuMode = False  # True ################## debug this!
+            self.gpuMode = True ################## debug this!
         except:
             self.gpuMode = False
         # make icons from files
@@ -39,7 +39,7 @@ class Run(QtGui.QMainWindow):
         # create color space, attach signal: slider, add event to filter
         self.colorSpace = colorSpaces(self.ui.colorSpace,
             self.ui.intensityLabel, self.ui.intensitySlider, self.ui.volumeSelect,
-            self.ui.drawMenu, self.ui.areaSelectionView, self.colorMode)
+            self.ui.drawMenu, self.ui.areaSelectionView, self.colorMode, self.gpuMode)
         self.ui.intensitySlider.valueChanged.connect(self.colorSpace.updateColorSpaceView)
         self.ui.colorSpace.viewport().installEventFilter(self)
         self.ui.colorSpace.viewport().setMouseTracking(True)
@@ -86,9 +86,9 @@ class Run(QtGui.QMainWindow):
             self.colorMode = 'rgb'
         self.colorSpace.colorMode = self.colorMode
         self.mipViews.colorMode = self.colorMode
+        self.colorSpace.createColorSpaceView()
         if self.mipViews.filename:
             self.mipViews.createMappedMip()
-            self.colorSpace.createColorSpaceView()
             self.colorSpace.updateColorSpaceView()
             self.colorSpace.createValidityMap()
 
@@ -109,9 +109,10 @@ class Run(QtGui.QMainWindow):
         self.mipViews.neuronLocating = False
         self.ui.neuronsDoneButton.setVisible(False)
         neuronsList = copy.copy(self.mipViews.selectedNeurons)
-        radius = self.colorSpace.side / 2
-        maps = self.colorSpace.saveStack(saving=False)
-        # copy.copy(self.mipViews.boundsInclude) this is for image correction
+        # radius = self.colorSpace.side / 2
+        # colormode = self.colorMode
+        # maps = self.colorSpace.saveStack(saving=False)
+        # copy.copy(self.mipViews.boundsInclude) -> this is for image correction
         # do stuff with variables above
         # clean up:
         self.mipViews.selectedNeurons = []
@@ -206,6 +207,8 @@ class Run(QtGui.QMainWindow):
             self.mipViews.updateMipView()
         if side > 400:  # change size of node drawn in colorSpace
             self.colorSpace.nodeSize = [int(-1 * side / 145), int((side / 145) + 1)]
+        else:
+            self.colorSpace.nodeSize = [-2, 3]
         self.colorSpace.createColorSpaceView()
         if self.mipViews.filename:
             self.mipViews.createMappedMip()
@@ -249,6 +252,7 @@ class Run(QtGui.QMainWindow):
                 if event.type() == QtCore.QEvent.MouseButtonPress:
                     self.colorSpace.mouseHold = True
                     pos = event.pos()
+                    self.colorSpace.currentArea = []
                     self.colorSpace.createBoundary(pos.x(), pos.y())
                 elif event.type() == QtCore.QEvent.MouseMove and self.colorSpace.mouseHold:
                     pos = event.pos()
@@ -306,10 +310,13 @@ class Run(QtGui.QMainWindow):
                 self.mipViews.getNeuronLocation(pos.x(), pos.y(), True)
             else:
                 xyv = self.mipViews.getNeuronLocation(pos.x(), pos.y())
-                if self.colorMode == 'rgb':
+                if self.colorMode == 'rgb' or self.colorSpace.areaMode == 'circular':
                     self.colorSpace.circularFromMip(xyv)
                 else:
                     self.colorSpace.sectorFromMip(xyv)
+        elif source == self.ui.mipDynamic.viewport() and event.type() == QtCore.QEvent.MouseButtonPress:
+            pos = event.pos()
+            self.mipViews.getDynamicPoint(pos.x(), pos.y())
         if event.type() == QtCore.QEvent.MouseButtonPress:
             self.debugLog()
         return False
@@ -323,13 +330,16 @@ class Run(QtGui.QMainWindow):
         st += '. volume, ' + str(self.colorSpace.indexVolume)
         self.ui.debugLabel.setText(QtCore.QString(st))
 
-if __name__ == '__main__':  # i added this
+if __name__ == '__main__':
     app = QtGui.QApplication(sys.argv)
-    ex = Run()  # this is customized
+    ex = Run()
     ex.show()
     sys.exit(app.exec_())
 
 
+# right now
+# color selector in main gui
+# edit image in correctionwin
 
 
 # change log:

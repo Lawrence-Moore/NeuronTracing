@@ -10,51 +10,7 @@ import re
 import time
 import arrayfire as af
 
-
-def saveMIP(validityMap, mappedMip, data, size): #####################fix this. what is this even doing?
-    dialog = QtGui.QFileDialog()
-    filename = str(dialog.getSaveFileName(filter=QtCore.QString('Images (*.tif)')))
-    if not filename:  # no filename was created
-        return
-    if type(validityMap) is bool:
-        tifffile.imsave(filename, data)
-        return
-    height, width, numcolors = data.shape
-    # initiate a progress bar
-    bar = QtGui.QProgressBar()
-    bar.setWindowTitle(QtCore.QString('Saving Masked MIP Image...'))
-    bar.setWindowModality(QtCore.Qt.WindowModal)
-    bar.resize(size, size / 20)
-    bar.move(size, size)
-    currentProgress = 0
-    bar.setMaximum(height + (2 * (height / 20)))
-    bar.show()
-    QtGui.QApplication.processEvents()
-    # start processing:
-    data = data.reshape((height * width), numcolors)
-    black = [0 for x in xrange(0, numcolors)]
-    indices = []
-    for y in xrange(0, height):  # apply validityMap (mask) to entire image
-        yshift = y * height
-        for x in xrange(0, width):
-            cx, cy, cv = mappedMip[0][y][x], mappedMip[1][y][x], mappedMip[2][y][x]
-            if not validityMap[cv][cx][cy]:
-                indices.append((yshift + x))
-        currentProgress += 1
-        bar.setValue(currentProgress)
-        QtGui.QApplication.processEvents()
-    data[indices] = black  # set pixels to black
-    currentProgress += height / 20
-    bar.setValue(currentProgress)
-    QtGui.QApplication.processEvents()
-    data = data.reshape(height, width, numcolors)  # reshape back to normal
-    tifffile.imsave(filename, data)
-    currentProgress += height / 20
-    bar.setValue(currentProgress)
-    QtGui.QApplication.processEvents()
-
-
-def applyToStack(maps, size, opendirectory, boundsinclude, colorMode):
+def applyToStack(maps, size, opendirectory, boundsinclude, colorMode, gpuMode):
     # initiate a progress bar
     bar = QtGui.QProgressBar()
     bar.setWindowTitle(QtCore.QString('Applying Mask to Stack...'))
@@ -125,7 +81,10 @@ def applyToStack(maps, size, opendirectory, boundsinclude, colorMode):
             [bounds, include] = boundsinclude
             mappedImage = rgbCorrection(original.astype(np.float32), bounds, False, include)  # apply correction to rgb
         if colorMode != 'rgb':
-            mappedImage = rgb2xyv(rgb, radius, colorMode)
+            if gpuMode:
+                mappedImage = rgb2xyv(rgb, radius, colorMode, only='Numpy')
+            else:
+                mappedImage = rgb2xyv(rgb, radius, colorMode)
         height, width, numcolors = original.shape
         original = original.reshape((height * width), numcolors)
         if numcolors == 3:
@@ -134,16 +93,19 @@ def applyToStack(maps, size, opendirectory, boundsinclude, colorMode):
             black = [0, 0, 0, 255]
         for color, map in enumerate(maps):
             # process the array
-            cropped = original.copy()  # what is to be saved
-            indices = []
-            for py in xrange(0, height):
-                yshift = py * width
-                for px in xrange(0, width):
-                    [a, b, c] = mappedImage[py][px]
-                    if not map[a][b][c]:
-                        indices.append((yshift + px))
-            cropped[indices] = black  # set pixels to black
-            cropped = cropped.reshape(height, width, numcolors)  # reshape back to normal
+            if gpuMode:
+                cropped = fullGPUMask(original, size, map, mappedImage)
+            else:
+                cropped = original.copy()  # what is to be saved
+                indices = []
+                for py in xrange(0, height):
+                    yshift = py * width
+                    for px in xrange(0, width):
+                        [a, b, c] = mappedImage[py][px]
+                        if not map[c, a, b]:
+                            indices.append((yshift + px))
+                cropped[indices] = black  # set pixels to black
+                cropped = cropped.reshape(height, width, numcolors)  # reshape back to normal
             # save the array as tif
             tifffile.imsave((saveUndilatedDir + ('Color%d/' % (color+1)) + file), cropped)
             # save the numpy array into numpystack
@@ -195,6 +157,28 @@ def applyToStack(maps, size, opendirectory, boundsinclude, colorMode):
         progress += 1
         bar.setValue(progress)
         QtGui.QApplication.processEvents()
+
+def fullGPUMask(cropped, side, validityMap, fullMap):
+    width, height = fullMap.shape[1], fullMap.shape[0]
+    cropped = cropped.reshape((width * height), 3)
+    height, width, channels = fullMap.shape
+    validityMap = af.data.flat(validityMap)
+    xyv = fullMap.reshape(height * width, 3)
+    x, y, v = np.split(xyv, 3, axis=1)
+    x, y, v = af.interop.np_to_af_array(x), af.interop.np_to_af_array(y), af.interop.np_to_af_array(v)
+    cropped = af.interop.np_to_af_array(cropped)
+    indices = af.data.range(width*height)
+    for i in af.ParallelRange(height * width):  # validitymap is v,x,y
+        cx, cy, cv = x[i], y[i], v[i]
+        ci = cv + cx * 256 + cy * side * 256
+        color = validityMap[ci]
+        pos = indices[i]
+        cropped[pos, 0] *= color
+        cropped[pos, 1] *= color
+        cropped[pos, 2] *= color
+    cropped = np.array(cropped)  # takes 60 ms to convert to numpy (about 40% of function)
+    cropped = cropped.reshape(height, width, 3)
+    return cropped
 
 def rgbCorrection(img, bounds, gpuMode, include):
     # converts a float32 to 8uint arr
@@ -253,8 +237,6 @@ def rgb2xyv(rgb, radius, colorMode, only='Python'):
     h *= 0.024639942381096416  # convert h from 255 to radians
     if colorMode == 'hsvI':
         radius *= 0.8
-        '''if radius > 128:
-            radius = 128'''
     elif colorMode == 'hsv':
         s = 255 - s
     s = s.astype(np.float32)
@@ -262,12 +244,10 @@ def rgb2xyv(rgb, radius, colorMode, only='Python'):
     x = (s * np.cos(h) + 1) * radius  # set x
     y = (1 - s * np.sin(h)) * radius  # set y
     realSideMax = radius * 2 - 1
-    x = x.astype(np.uint16)
     x[x > realSideMax] = realSideMax
-    y = y.astype(np.uint16)
     y[y > realSideMax] = realSideMax
-    xyvNumpy = np.zeros((hsv.shape[0], hsv.shape[1], 3), dtype=np.uint16)
-    xyvNumpy[:, :, 0], xyvNumpy[:, :, 1], xyvNumpy[:, :, 2] = x, y, v
+    xyvNumpy = np.stack((x, y, v), axis=2)
+    xyvNumpy = xyvNumpy.astype(np.uint16)
     if only == 'Numpy':
         return xyvNumpy
     xyv = xyvNumpy.tolist()
@@ -275,6 +255,58 @@ def rgb2xyv(rgb, radius, colorMode, only='Python'):
         return xyv
     return xyv, xyvNumpy
 
+def xyv2rgb(xyv, radius, colorMode):
+    # note: will accept python list of three numpy x, y, v arrays as separate channels
+    # or will accept xyv as a single numpy array. always returns an 8-bit rgb image
+    if type(xyv) is list:
+        x, y, v = xyv
+    else:
+        if xyv.dtype != np.float32:
+            xyv = xyv.astype(np.float32)
+        [x, y, v] = np.split(xyv, 3, axis=2)
+    if colorMode == 'hsvI':
+        dx = 1 - x / radius
+        dy = y / radius - 1
+        distancesqrd = np.square(dx) + np.square(dy)
+        distancesqrd *= 1.25  # buffer
+        s = np.sqrt(distancesqrd)
+        s[s > 1] = 0
+    elif colorMode == 'hsv':
+        dx = 1 - x / radius
+        dy = y / radius - 1
+        distancesqrd = np.square(dx) + np.square(dy)
+        s = 1 - np.sqrt(distancesqrd)
+        s[s < 0] = 0
+    h = ((np.arctan2(dy, dx) / np.pi) + 1) * 180
+    hsv = np.stack((h, s, v), axis=2)  # h = [0-360], s = [0-1], v = [0-1]
+    rgb = cv2.cvtColor(hsv, cv2.COLOR_HSV2RGB)
+    rgb *= 255
+    rgb = rgb.astype(np.uint8)
+    return rgb
+
+def xyvLst2rgb(xyvLst, radius, colorMode):
+    # converts to hsv: list of 3 ints: hsv color, h:[0, 2pi], s:[0, 1], v:[0, 255]
+    rgbLst = []
+    for [x, y, v] in xyvLst:
+        if colorMode == 'hsvI':
+            dx = 1 - x / radius
+            dy = y / radius - 1
+            distancesqrd = dx ** 2 + dy ** 2
+            distancesqrd *= 1.25  # buffer
+            s = math.sqrt(distancesqrd)
+            if s > 1:
+                s = 0
+        elif colorMode == 'hsv':
+            dx = 1 - x / radius
+            dy = y / radius - 1
+            distancesqrd = dx ** 2 + dy ** 2
+            s = 1 - math.sqrt(distancesqrd)
+            if s < 0:
+                s = 0
+        h = math.atan2(dy, dx) + math.pi
+        rgb = hsv2rgb([h, s, v])
+        rgbLst.append(rgb)
+    return rgbLst
 
 def hsvtoxyv(hsv, radius):
     '''
