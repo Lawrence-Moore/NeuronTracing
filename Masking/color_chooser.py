@@ -32,6 +32,7 @@ class ColorChooser(QtGui.QMainWindow):
         self.mergeButton.setText('Merge')
         self.mergeButton.released.connect(self.merge)
         self.reset()
+        self.merges = []  # [merged color, [origins of merge]]
         self.doneInitializing = True
         # create merge buttons
 
@@ -67,6 +68,7 @@ class ColorChooser(QtGui.QMainWindow):
             merged[1] += g / numColors
             merged[2] += b / numColors
         self.modifiedRgbList[first] = merged
+        self.merges.append([merged, colors])
         self.color2View(merged, self.colorViews[first])
 
     def delete(self):
