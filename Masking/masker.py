@@ -7,7 +7,7 @@ import time
 # import arrayfire as af
 import numpy as np
 from PIL import Image
-from saving_and_color import rgb2xyv
+from saving_and_color import rgb2xyv, xyvLst2rgb
 import copy
 
 sys.path.append("../Correction")
@@ -33,7 +33,7 @@ class Run(QtGui.QMainWindow):
         try:
             af.info()
             self.ui.gpuLabel.setText(QtCore.QString('GPU: ON'))
-            self.gpuMode = False  # True ################## debug this!
+            self.gpuMode = True ################## debug this!
         except:
             self.gpuMode = False
         # make icons from files
@@ -43,7 +43,7 @@ class Run(QtGui.QMainWindow):
         # create color space, attach signal: slider, add event to filter
         self.colorSpace = colorSpaces(self.ui.colorSpace,
             self.ui.intensityLabel, self.ui.intensitySlider, self.ui.volumeSelect,
-            self.ui.drawMenu, self.ui.areaSelectionView, self.colorMode)
+            self.ui.drawMenu, self.ui.areaSelectionView, self.colorMode, self.gpuMode)
         self.ui.intensitySlider.valueChanged.connect(self.colorSpace.updateColorSpaceView)
         self.ui.colorSpace.viewport().installEventFilter(self)
         self.ui.colorSpace.viewport().setMouseTracking(True)
@@ -90,9 +90,9 @@ class Run(QtGui.QMainWindow):
             self.colorMode = 'rgb'
         self.colorSpace.colorMode = self.colorMode
         self.mipViews.colorMode = self.colorMode
+        self.colorSpace.createColorSpaceView()
         if self.mipViews.filename:
             self.mipViews.createMappedMip()
-            self.colorSpace.createColorSpaceView()
             self.colorSpace.updateColorSpaceView()
             self.colorSpace.createValidityMap()
 
@@ -115,33 +115,26 @@ class Run(QtGui.QMainWindow):
 
         # neurons list is xyz
         neuronsList = copy.copy(self.mipViews.selectedNeurons)
+        colormode = self.colorMode
+
         radius = self.colorSpace.side / 2
-        maps = self.colorSpace.saveStack(saving=False)
+        # maps = self.colorSpace.saveStack(saving=False)
 
         # convert the image into the xyv space
-        img = rgb2xyv(self.mipViews.originalImage, radius, hsv)
+        # img = rgb2xyv(self.mipViews.originalImage, radius, "hsv")
+        img = self.mipViews.originalImage
 
         # k_means(self.mipViews.originalImage, neuronsList, n_colors=len(neuronsList))
+        neuronsList = xyvLst2rgb(neuronsList, radius, colormode)
         weights = [np.array(weight) for weight in neuronsList]
         weights = np.vstack(tuple(weights))
 
         # make sure it's on the 0 - 1 scale
         weights = weights.astype(float) / np.max(weights)
-        clustered_img, som = self_organizing_map(img, weights=weights, n_colors=len(weights))
+        k_clustered_img, k_centers = self_organizing_map(image=img, n_colors=len(weights), threshold=True)
+        som_clustered_img, som_centers = k_means(image=img, weights=weights, n_colors=len(weights), threshold=True)
+        # copy.copy(self.mipViews.boundsInclude) -> this is for image correction
 
-        # go through the color spaces and see how K means and SOM split them
-        # k_means_map = np.zeros(maps.shape)
-        # som_map = np.zeros(maps.shape)
-        # for v in range(maps.shape[0]):
-        #     for x in range(maps.shape[1]):
-        #         for y in range(maps.shape[2]):
-        #             som_map[z, x, y] = som.closest_weight([x, y, v])
-        #             k_means_map = kmeans.predict([[x, y, v]])
-
-        # do stuff with list of neuronsList
-        # maps = self.colorSpace.saveStack(saving=False)
-        # copy.copy(self.mipViews.boundsInclude)
-        # copy.copy(self.mipViews.boundsInclude) this is for image correction
         # do stuff with variables above
         # clean up:
 
@@ -237,6 +230,8 @@ class Run(QtGui.QMainWindow):
             self.mipViews.updateMipView()
         if side > 400:  # change size of node drawn in colorSpace
             self.colorSpace.nodeSize = [int(-1 * side / 145), int((side / 145) + 1)]
+        else:
+            self.colorSpace.nodeSize = [-2, 3]
         self.colorSpace.createColorSpaceView()
         if self.mipViews.filename:
             self.mipViews.createMappedMip()
@@ -280,6 +275,7 @@ class Run(QtGui.QMainWindow):
                 if event.type() == QtCore.QEvent.MouseButtonPress:
                     self.colorSpace.mouseHold = True
                     pos = event.pos()
+                    self.colorSpace.currentArea = []
                     self.colorSpace.createBoundary(pos.x(), pos.y())
                 elif event.type() == QtCore.QEvent.MouseMove and self.colorSpace.mouseHold:
                     pos = event.pos()
@@ -337,10 +333,13 @@ class Run(QtGui.QMainWindow):
                 self.mipViews.getNeuronLocation(pos.x(), pos.y(), True)
             else:
                 xyv = self.mipViews.getNeuronLocation(pos.x(), pos.y())
-                if self.colorMode == 'rgb':
+                if self.colorMode == 'rgb' or self.colorSpace.areaMode == 'circular':
                     self.colorSpace.circularFromMip(xyv)
                 else:
                     self.colorSpace.sectorFromMip(xyv)
+        elif source == self.ui.mipDynamic.viewport() and event.type() == QtCore.QEvent.MouseButtonPress:
+            pos = event.pos()
+            self.mipViews.getDynamicPoint(pos.x(), pos.y())
         if event.type() == QtCore.QEvent.MouseButtonPress:
             self.debugLog()
         return False
@@ -354,13 +353,16 @@ class Run(QtGui.QMainWindow):
         st += '. volume, ' + str(self.colorSpace.indexVolume)
         self.ui.debugLabel.setText(QtCore.QString(st))
 
-if __name__ == '__main__':  # i added this
+if __name__ == '__main__':
     app = QtGui.QApplication(sys.argv)
-    ex = Run()  # this is customized
+    ex = Run()
     ex.show()
     sys.exit(app.exec_())
 
 
+# right now
+# color selector in main gui
+# edit image in correctionwin
 
 
 # change log:

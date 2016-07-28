@@ -418,17 +418,15 @@ def display_image(image):
     plt.show()
 
 
-def k_means(image=None, images=None, weights=None, n_colors=64, non_background_sample_percent=.60, threshold=False):
+def k_means(image=None, images=None, weights=None, n_colors=64, non_background_sample_percent=.20, threshold=False):
     neuron_pixels, non_neuron_pixels, image_array, image = sample_data(image, images)
 
     if threshold:
-        neuron_pixels_sample = shuffle(neuron_pixels, random_state=0)[:int(non_background_sample_percent * neuron_pixels.shape[0])]
-        non_neuron_pixels_sample = shuffle(non_neuron_pixels, random_state=0)[:int(.05 * neuron_pixels.shape[0])]  # get only 5%
-        image_array_sample = np.concatenate((neuron_pixels_sample, non_neuron_pixels_sample))
+        image_array_sample = shuffle(neuron_pixels, random_state=0)[:int(non_background_sample_percent * neuron_pixels.shape[0])]
     else:
         image_array_sample = shuffle(image_array, random_state=0)[:int(non_background_sample_percent * image_array.shape[0])]
 
-    if weights:
+    if weights is not None:
         # reshape weights appropiately. Assumes a list of lists is passed in
         weights = [np.array(weight) for weight in weights]
         weights = np.vstack(tuple(weights))
@@ -460,38 +458,24 @@ def k_means(image=None, images=None, weights=None, n_colors=64, non_background_s
 
     w, h, d = tuple(image.shape)
     quantized_image = recreate_image(kmeans.cluster_centers_, labels, w, h)
-    codebook_random = shuffle(image_array, random_state=0)[:n_colors + 1]
-    labels_random = pairwise_distances_argmin(codebook_random, image_array, axis=0)
 
-    # return quantized_image, kmeans
-    # Display all results, alongside original image
-    plt.figure(1)
-    plt.clf()
-    ax = plt.axes([0, 0, 1, 1])
-    plt.axis('off')
-    plt.title('Original image (96,615 colors)')
+    # display the image
+    fig = plt.figure()
+    ax = fig.add_subplot(1, 2, 1)
     plt.imshow(image)
-
-    plt.figure(2)
-    plt.clf()
-    ax = plt.axes([0, 0, 1, 1])
-    plt.axis('off')
-    plt.title('Quantized image (64 colors, K-Means)')
+    ax.set_title('Original')
+    ax = fig.add_subplot(1, 2, 2)
     plt.imshow(quantized_image)
-
-    plt.figure(3)
-    plt.clf()
-    ax = plt.axes([0, 0, 1, 1])
-    plt.axis('off')
-    plt.title('Quantized image (64 colors, Random)')
-    plt.imshow(recreate_image(codebook_random, labels_random, w, h))
+    ax.set_title('After K-Means')
     plt.show()
+
+    return quantized_image, kmeans.cluster_centers_
 
 
 def self_organizing_map(image=None, images=None, weights=None, n_colors=64, dim=None, sample_perc=.1, threshold=False):
     neuron_pixels, non_neuron_pixels, pixels, image = sample_data(image, images)
 
-    if dim is None and weights:
+    if dim is None and weights is not None:
         # figure out a way to spread out the nodes of the som
         # find the factor closest to the square root
         factor = get_factor_closest_to_sqrt(len(weights))
@@ -521,10 +505,7 @@ def self_organizing_map(image=None, images=None, weights=None, n_colors=64, dim=
 
     if threshold:
         # get mostly bright pixels with a bit of background
-        sample_neuron_pixels = shuffle(neuron_pixels, random_state=0)[:int(sample_perc * neuron_pixels.shape[0])]
-        sample_non_neuron_pixels = shuffle(non_neuron_pixels, random_state=0)[:int(.05 * sample_neuron_pixels.shape[0])]
-        training_pixels = np.concatenate((sample_neuron_pixels, sample_non_neuron_pixels))
-        som.train_batch(training_pixels)
+        som.train_random(neuron_pixels, 1000)
     else:
         som.train_random(pixels, 1000)
 
@@ -537,7 +518,16 @@ def self_organizing_map(image=None, images=None, weights=None, n_colors=64, dim=
     for i, q in enumerate(qnt):
         clustered[np.unravel_index(i, dims=(image.shape[0], image.shape[1]))] = q
 
-    return clustered * np.max(image), som
+    fig = plt.figure()
+    ax = fig.add_subplot(1, 2, 1)
+    plt.imshow(image)
+    ax.set_title('Original')
+    ax = fig.add_subplot(1, 2, 2)
+    plt.imshow(clustered)
+    ax.set_title('After SOM Clustering')
+    plt.show()
+
+    return clustered, som.weights
 
 
 def sample_data(image=None, images=None):

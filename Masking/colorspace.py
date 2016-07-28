@@ -7,6 +7,7 @@ import cv2
 import matplotlib
 import saving_and_color
 import plotspace
+# import arrayfire as af
 from PIL import Image
 
 # Docstring Format:
@@ -19,8 +20,9 @@ from PIL import Image
 
 class colorSpaces():
     def __init__(self, colorspace, intensitylabel, intensityslider,
-                 volumeselect, drawmenu, areaselectionview, colormode):
+                 volumeselect, drawmenu, areaselectionview, colormode, gpumode):
         self.colorMode = colormode  # vs 'hsv'
+        self.gpuMode = gpumode
         self.view = colorspace  # QGraphicsView: graphics window for color space
         self.intensityLabel = intensitylabel  # label above slider w/intensity
         self.intensitySlider = intensityslider  # slider for intensity v in HSV
@@ -79,6 +81,7 @@ class colorSpaces():
         static name for mode in attribute self.areaMode
         '''
         self.deleteArea()
+        print 'im changing the drawmode to', text
         if text == 'Auto':
             self.areaMode = 'auto'
         elif text == 'Manual':
@@ -95,7 +98,7 @@ class colorSpaces():
         :return: none: adds (x, y) coordinate to currentArea, sets pixel
         in colorspace view to boundaryColor, and pushes to display
         '''
-        if 0 < x < self.side and 0 < y < self.side:
+        if (self.nodeSize[1] <= x <= (self.side - self.nodeSize[1]) and self.nodeSize[1] <= y <= (self.side - self.nodeSize[1])):
             self.currentArea.append([x, y])
             self.currentImage.setPixel(x, y, self.boundaryColor)
             self.drawColorSpaceView()
@@ -121,8 +124,8 @@ class colorSpaces():
         dI, dF = degrees - degreeBuffer, degrees + degreeBuffer
         xIUnit, yIUnit = math.cos(dI), math.sin(dI)
         xFUnit, yFUnit = math.cos(dF), math.sin(dF)
-        dS = ((center - 4) / 4)
-        for s in xrange(dS, (center - 3), dS):
+        dS = ((center - self.nodeSize[1] - 1) / 4)
+        for s in xrange(dS, (center - self.nodeSize[1]), dS):
             self.currentArea.append([(int(xIUnit * s) + center), int(yIUnit * s) + center])
         xRim, yRim = int(center + (s * math.cos(degrees))), int(center + (s * math.sin(degrees)))
         self.currentArea.append([xRim, yRim])
@@ -152,7 +155,7 @@ class colorSpaces():
         :return: none: draws a line from center of circle (self.currentArea[0])
         and args x,y to represent radius of circle being drawn
         '''
-        if not (3 < x < (self.side - 3) and 3 < y < (self.side - 3)):
+        if not (self.nodeSize[1] <= x <= (self.side - self.nodeSize[1]) and self.nodeSize[1] <= y <= (self.side - self.nodeSize[1])):
             return
         def recur(previous, next):
             # draw a point half-way between points [x, y] previous and next
@@ -186,18 +189,19 @@ class colorSpaces():
         numNodes = 10                               ############# define as a constant/preferences
         radianInterval = 2 * math.pi / numNodes
         # if goes out of bounds, put in bounds
-        if origin[0] - radius <= 3 and (origin[0] - 4) < radius:
-            radius = origin[0] - 4
-        if origin[0] + radius >= self.side - 3 and (self.side - origin[0] - 4) < radius:
-            radius = self.side - origin[0] - 4
-        if origin[1] - radius <= 3 and (origin[1] - 4) < radius:
-            radius = origin[1] - 4
-        if origin[1] + radius >= self.side - 3 and (self.side - origin[1] - 4) < radius:
-            radius = self.side - origin[1] - 4
+        dN = self.nodeSize[1]
+        if origin[0] - radius < dN and (origin[0] - dN) < radius:
+            radius = origin[0] - dN
+        if origin[0] + radius > self.side - dN and (self.side - origin[0] - dN) < radius:
+            radius = self.side - origin[0] - dN
+        if origin[1] - radius < dN and (origin[1] - dN) < radius:
+            radius = origin[1] - dN
+        if origin[1] + radius > self.side - dN and (self.side - origin[1] - dN) < radius:
+            radius = self.side - origin[1] - dN
         for n in xrange(0, numNodes):  # find and save location of nodes
             x = origin[0] + int(radius * math.cos(n * radianInterval))
             y = origin[1] + int(radius * math.sin(n * radianInterval))
-            if not (3 < x < self.side - 3 and 3 < y < self.side - 3):
+            if not (dN <= x <= self.side - dN and dN <= y <= self.side - dN):
                 self.currentArea = []
                 error = QtGui.QMessageBox()
                 error.setText(QtCore.QString('Error! There was an error in '
@@ -219,7 +223,7 @@ class colorSpaces():
         point to the previous point in currentArea. switches to manualUpdate
         mode if loop is completed.
         '''
-        if 3 < x < self.side - 3 and 3 < y < self.side - 3:
+        if (self.nodeSize[1] <= x <= (self.side - self.nodeSize[1]) and self.nodeSize[1] <= y <= (self.side - self.nodeSize[1])):
             def recur(previous, next):
                 (ox, oy) = previous
                 (nx, ny) = next
@@ -258,7 +262,7 @@ class colorSpaces():
         :return: none: changes manualSelected to current point to be edited if
         selecting or changes location of manualSelect point to new location x,y
         '''
-        if not (3 < x < self.side - 3 and 3 < y < self.side - 3):
+        if not (self.nodeSize[1] <= x <= (self.side - self.nodeSize[1]) and self.nodeSize[1] <= y <= (self.side - self.nodeSize[1])):
             return False
         if selecting:  # if it is within (2*sizeNode - 1) pixels, select point
             distance = self.nodeSize[1] * 2 - 1
@@ -434,42 +438,16 @@ class colorSpaces():
             rgb = np.zeros((256, 256, 3), dtype=np.uint8)
             rgb[:, :, 0], rgb[:, :, 1], rgb[:, :, 2] = r, g, b
         else:
-            center = self.side / 2
+            radius = self.side / 2
             # uses x,y coordinates on plane to find h,s locations in HSV cylinder
             # and then paints rgb color at x,y location from h,s,v=255
-            blank = np.zeros((self.side))
-            y = np.zeros((self.side, self.side))
-            x = np.zeros((self.side, self.side))
-            for i in xrange(0, self.side):
-                temp = blank.copy()
-                temp.fill(i)
-                y[i] = temp
-            for i in xrange(0, self.side):
-                blank[i] = i
-            for i in xrange(0, self.side):
-                x[i] = blank
-            v = np.ones((self.side, self.side))
-            if self.colorMode == 'hsvI':
-                dx = 1 - x / center
-                dy = y / center - 1
-                distancesqrd = np.square(dx) + np.square(dy)
-                distancesqrd *= 1.25  # buffer
-                s = np.sqrt(distancesqrd)
-                s[s > 1] = 0
-            elif self.colorMode == 'hsv':
-                dx = 1 - x / center
-                dy = y / center - 1
-                distancesqrd = np.square(dx) + np.square(dy)
-                s = 1 - np.sqrt(distancesqrd)
-                s[s < 0] = 0
-            h = ((np.arctan2(dy, dx) / np.pi) + 1) * 180
-            hsv = np.zeros((self.side, self.side, 3)).astype(np.float32)
-            hsv[:, :, 0] = h  # [0-360]
-            hsv[:, :, 1] = s  # [0-1]
-            hsv[:, :, 2] = v  # [0-1]
-            rgb = cv2.cvtColor(hsv, cv2.COLOR_HSV2RGB)
-            rgb *= 255
-            rgb = rgb.astype(np.uint8)
+            line= np.arange(0, self.side, 1, dtype=np.float32)
+            y = np.expand_dims(line, axis=1)
+            y = np.repeat(y, self.side, axis=1)
+            x = np.expand_dims(line, axis=0)
+            x = np.repeat(x, self.side, axis=0)
+            v = np.ones((self.side, self.side), dtype=np.float32)
+            rgb = saving_and_color.xyv2rgb([x, y, v], radius, self.colorMode)
         self.csImage = QtGui.QImage(rgb, rgb.shape[1], rgb.shape[0],
                             rgb.shape[1] * 3, QtGui.QImage.Format_RGB888)
         if draw:
@@ -539,11 +517,12 @@ class colorSpaces():
             self.addArea()
         self.drawingAreas[-1] = False
         self.currentArea = []
+        self.validityMap = False
         self.updateColorSpaceView(False)
         self.drawColorSpaceView()
         self.createAreaView()
         if len(self.areas) == 1 and not self.areas[0]:
-            self.updateDynamic(False)
+            self.updateDynamic(self.validityMap)
         else:
             self.createValidityMap()
         if self.areaMode == 'manualUpdate':
@@ -585,7 +564,8 @@ class colorSpaces():
         else:
             [self.areas, self.areaViewPoints, self.drawingAreas,
                         self.indexArea] = self.volumes[self.indexVolume]
-            self.currentArea = self.drawingAreas[self.indexArea][1]
+            if type(self.drawingAreas[self.indexArea]) is not bool:
+                self.currentArea = self.drawingAreas[self.indexArea][1]
         self.refreshAreaSpace()
         self.createValidityMap()
 
@@ -656,6 +636,47 @@ class colorSpaces():
         aX, aY = aX.astype(np.uint16), aY.astype(np.uint16)
         return aX, aY
 
+    def numpyAreas2Dict(self, area):
+        dict = {}
+        minx = self.side
+        maxx = 0
+        areaX, areaY = area[0], area[1]
+        areaX, areaY = self.rescaleAreaXY(areaX, areaY)
+        areaX, areaY = areaX.tolist(), areaY.tolist()
+        for (x, y) in sorted(zip(areaX, areaY)):  # sort by the x's
+            if x in dict:  # append like [min, max]
+                if len(dict[x]) == 2:
+                    if y > dict[x][1]:
+                        dict[x][1] = y
+                    elif y < dict[x][0]:
+                        dict[x][0] = y
+                else:
+                    if y > dict[x][0]:
+                        dict[x].append(y)
+                    elif y < dict[x][0]:  # if y == dict[x][0], error will be thrown
+                        [temp] = dict[x]
+                        del dict[x]
+                        dict[x] = [y, temp]
+            else:
+                dict[x] = [y]
+            if x < minx:
+                minx = x
+            if x > maxx:
+                maxx = x
+        while len(dict[minx]) != 2:  # don't get edge of one point
+            del dict[minx]
+            minx += 1
+            while minx not in dict:
+                minx -= 1
+        dict['i'] = minx
+        while len(dict[maxx]) != 2:  # don't get edge
+            del dict[maxx]
+            maxx -= 1
+            while maxx not in dict:
+                maxx -= 1
+        dict['f'] = maxx
+        return dict
+
     def createValidityMap(self, push=True):  #vxy
         a = time.time()
         if push:
@@ -664,31 +685,23 @@ class colorSpaces():
                                           copy.copy(self.indexArea)]
         else:
             self.areas = self.volumes[self.indexVolume][0]
-        self.validityMap = np.zeros(shape=(256, self.side, self.side), dtype=bool)
+        if self.gpuMode:
+            self.validityMap = af.constant(0, 256, self.side, self.side, dtype=af.Dtype.u8)
+        else:
+            self.validityMap = np.zeros(shape=(256, self.side, self.side), dtype=np.uint8)
         if not self.areas[0]:
             self.validityMap = False
             self.updateDynamic(self.validityMap)
             return
         if len(self.areas) == 1 or (len(self.areas) == 2 and not self.areas[1]):
-            (areaX, areaY, maxv) = self.areas[0]
-            areaX, areaY = self.rescaleAreaXY(areaX, areaY)
-            plane = np.zeros(shape=(self.side, self.side), dtype=bool)
-            areaX, areaY = areaX.tolist(), areaY.tolist()
-            for i, x in enumerate(areaX):
+            dict = self.numpyAreas2Dict(self.areas[0])
+            minx, maxx = dict['i'], dict['f']
+            for x in xrange(minx, (maxx + 1)):
                 try:
-                    if areaX[i + 1] == x:  # duplicate
-                        continue
+                    [ymin, ymax] = dict[x]
                 except:
-                    pass
-                try:
-                    inew = areaX[(i + 1)::].index(x) + i + 1
-                except:
-                    continue
-                if areaY[inew] > areaY[i]:
-                    plane[x][areaY[i]:areaY[inew]] = True
-                else:
-                    plane[x][areaY[inew]:areaY[i]] = True
-            self.validityMap[0:256] = plane
+                    pass  # use previous values
+                self.validityMap[0:256, x, ymin:ymax] = 1
             if push:
                 b = time.time()
                 print 'time to create validityMap', 1000*(b-a)
@@ -702,39 +715,14 @@ class colorSpaces():
             if area:
                 ind.append(i)  # make orderedareas
                 indvs.append(area[2])  # make orderedareas
-                dict = {}
-                minx = self.side
-                maxx = 0
-                areaX, areaY = area[0], area[1]
-                areaX, areaY = self.rescaleAreaXY(areaX, areaY)
-                for (x, y) in sorted(zip(areaX, areaY)):  # sort by the x's
-                    if x in dict:  # append like [min, max]
-                        if len(dict[x]) == 2:
-                            continue
-                        if y > dict[x][0]:
-                            dict[x].append(y)
-                        else:
-                            [temp] = dict[x]
-                            del dict[x]
-                            dict[x] = [y, temp]
-                    else:
-                        dict[x] = [y]
-                    if x < minx:
-                        minx = x
-                    if x > maxx:
-                        maxx = x
-                while len(dict[minx]) != 2:  # don't get edge of one point
-                    del dict[minx]
-                    minx += 1
-                dict['i'] = minx
-                while len(dict[maxx]) != 2:  # don't get edge
-                    del dict[maxx]
-                    maxx -= 1
-                dict['f'] = maxx
+                dict = self.numpyAreas2Dict(area)
                 areaDicts.append(dict)
         orderedareas = [[i, v] for (v, i) in sorted(zip(indvs, ind))]
         [lowI, lowV] = orderedareas[0]
         for [highI, highV] in orderedareas[1::]:
+            if highV == lowV:
+                print 'an area was discounted for having the same intensity as the other'
+                continue
             lowXi = areaDicts[lowI]['i']
             lowXf = areaDicts[lowI]['f']
             highXi = areaDicts[highI]['i']
@@ -751,11 +739,17 @@ class colorSpaces():
                     avgFracX = (avgX - avgXi) / avgDX
                     highX = int(avgFracX * highDX) + highXi
                     lowX = int(avgFracX * lowDX) + lowXi
-                    [highYmin, highYmax] = areaDicts[highI][highX] # get min and max
-                    [lowYmin, lowYmax] = areaDicts[lowI][lowX] # get min max
+                    try:
+                        [highYmin, highYmax] = areaDicts[highI][highX]  # get min and max
+                    except:
+                        pass  # use past values
+                    try:
+                        [lowYmin, lowYmax] = areaDicts[lowI][lowX]  # get min max
+                    except:
+                        pass  # use previous values
                     avgYmin = int(highYmin * fracV + lowYmin * ofracV)
                     avgYmax = int(highYmax * fracV + lowYmax * ofracV) + 1
-                    self.validityMap[v][avgX][avgYmin:avgYmax] = True
+                    self.validityMap[v, avgX, avgYmin:avgYmax] = 1
             [lowI, lowV] = [highI, highV]
         b = time.time()
         if push:
@@ -769,7 +763,11 @@ class colorSpaces():
     def plotSpace(self):
         if type(self.validityMap) is bool:
             return
-        plotspace.displayValidityMap(self.validityMap, 8, 120)
+        if self.gpuMode:
+            validityMap = np.array(self.validityMap)
+            plotspace.displayValidityMap(validityMap, 8, 500) # compression, particle size (independent vars)
+        else:
+            plotspace.displayValidityMap(self.validityMap, 8, 120)
 
     def saveStack(self, boundsinclude=False, saving=True):
         if saving:
@@ -789,7 +787,8 @@ class colorSpaces():
         [self.areas, self.areaViewPoints, self.drawingAreas,
                         self.indexArea] = self.volumes[self.indexVolume]
         if saving:
-            saving_and_color.applyToStack(maps, self.view.width(), opendirectory, boundsinclude)
+            saving_and_color.applyToStack(maps, self.view.width(),
+                    opendirectory, boundsinclude, self.colorMode, self.gpuMode)
         else:
             return maps
 

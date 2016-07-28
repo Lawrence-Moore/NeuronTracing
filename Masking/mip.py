@@ -6,6 +6,7 @@ import saving_and_color
 import cv2
 import tifffile
 from editimage import EditWindow
+# import arrayfire as af
 import copy
 import sys
 
@@ -157,10 +158,9 @@ class mips():
         a = time.time()
         radius = self.colorSpace.width() / 2
         if self.colorMode == 'rgb':
-            self.mappedMip = [self.originalImage[:, :, 0].copy(),
-                self.originalImage[:, :, 1].copy(), self.originalImage[:, :, 2].copy()]
+            self.mappedMip = self.originalImage.copy()
         else:
-            if self.gpuMode and False:  # we are not ready for this (using NumpyMip) yet
+            if self.gpuMode:  # we are not ready for this (using NumpyMip) yet
                 self.mappedNumpyMip = saving_and_color.rgb2xyv(self.originalImage, radius, self.colorMode, only='Numpy')
             else:
                 self.mappedMip, self.mappedNumpyMip = saving_and_color.rgb2xyv(self.originalImage, radius, self.colorMode, only=False)
@@ -187,6 +187,19 @@ class mips():
                 return
         else:  # push in the given map into this module's map
             self.validityMap = map
+        a = time.time()
+        if self.gpuMode:
+            cropped = saving_and_color.fullGPUMask(self.originalImage,
+                self.colorSpace.width(), self.validityMap, self.mappedNumpyMip)
+            if retrn:
+                return cropped
+            [xi, yi, xf, yf] = self.croparea
+            cropped = cropped[yi:yf, xi:xf]  # takes 30 ms to crop and resize
+            cropped = cv2.resize(cropped, (self.dynamicView.width(), self.dynamicView.height()))
+            b = time.time()
+            print 'time to mask with gpu:', (b-a)*1000
+            self.drawDynamicView(cropped)
+            return
         if not retrn:
             [xi, yi, xf, yf] = self.croparea  # get area to be shown in dynamicView
             # get sizes of dynamicView and cropped area
@@ -204,13 +217,11 @@ class mips():
             width, height = self.originalImage.shape[1], self.originalImage.shape[0]
         cropped = cropped.reshape((width * height), 3)
         indices = []
-        a = time.time()
         if retrn:
-            # eventually outsource this with gpu/cpu into saving_and_color with args(mappedMip, Image.copy())
             for py in xrange(0, height):  # apply validityMap (mask) to entire image
                 yshift = py * width
                 for px in xrange(0, width):
-                    [x, y, v] = self.mappedMip[0][py][px], self.mappedMip[1][py][px], self.mappedMip[2][py][px]
+                    [x, y, v] = self.mappedMip[py][px]
                     if not self.validityMap[v, x, y]:
                         indices.append((yshift + px))
         else:
@@ -224,15 +235,15 @@ class mips():
                         indices.append((yshift + px))
                     mx += fracw
                 my += frach
-        b = time.time()
+
         cropped[indices] = [0, 0, 0]  # set pixels to black
         cropped = cropped.reshape(height, width, 3)  # reshape back to normal
         if retrn:
             return cropped
         else:
-            # push to display
-            self.drawDynamicView(cropped)
-        print 'time to check validity ms:', (b-a)*1000
+            b = time.time()
+            print 'time to mask with cpu ms:', (b - a) * 1000
+            self.drawDynamicView(cropped) # push to display
 
     def zoomPlus(self):
         '''
@@ -347,7 +358,16 @@ class mips():
         del img
 
     def saveImage(self):
-        saving_and_color.saveMIP(self.validityMap, self.mappedMip, self.originalImage.copy(), self.colorSpace.width())
+        # warning: this saves an 8-bit image!
+        dialog = QtGui.QFileDialog()
+        filename = str(dialog.getSaveFileName(filter=QtCore.QString('Images (*.tif)')))
+        if not filename:  # no filename was created
+            return
+        if type(self.validityMap) is bool:
+            tifffile.imsave(filename, self.originalImage)
+            return
+        cropped = self.updateDynamic(self.validityMap, retrn=True)
+        tifffile.imsave(filename, cropped)
 
     def editImage(self): ######################## the button should only be made visible after importing an image
         if not self.filename:
@@ -361,4 +381,20 @@ class mips():
         self.originalImage, self.boundsInclude = self.eWindow.returnEditedImage()
         self.createMappedMip()
         self.updateMipView()
-        self.updateDynamic(self.validityMap)
+
+    def getDynamicPoint(self, mx, my):
+        if not self.filename:
+            return
+        viewWidth, viewHeight = self.fullView.width(), self.fullView.height()
+        fracMx, fracMy = float(mx) / viewWidth, float(my) / viewHeight
+        [xi, yi, xf, yf] = self.croparea
+        width, height = xf - xi, yf - yi
+        px, py = int(fracMx * width + xi), int(fracMy * height + yi)
+        [x, y, v] = self.mappedNumpyMip[py][px]
+        print 'color at this point:', [x, y, v],
+        if type(self.validityMap) is not bool:
+            print 'value in validitymap:', self.validityMap[v, x, y],
+        print
+
+
+

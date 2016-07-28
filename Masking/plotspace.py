@@ -17,25 +17,32 @@ def displayValidityMap(map, compression, size):  # v, x, y
     print map.shape
     compressed = np.zeros((vlength/compression, xlength/compression, ylength/compression), dtype=bool)
     for x in xrange(0, xlength, compression):
-        for v in xrange(compression, vlength-compression, compression):
+        for v in xrange(compression, vlength-compression-1, compression):
             for y in xrange(1, ylength, compression):
                 if map[v][x][ylength-y]:
                     compressed[v/compression][x/compression][y/compression] = True
     map = compressed
-    #map = imresize(map, (vlength/2, xlength/2, ylength/2))
-    #map = map.astype(np.uint8)
-    #map.resize((vlength / 5, xlength / 5, ylength / 5), refcheck=False)
-    # xlength /= compression
-    # ylength /= compression
-    # vlength /= compression
-    # X, Y, V = np.array([]), np.array([]), np.array([])
     fig = plt.figure()
     ax = Axes3D(fig)
     dilationStruct = np.array([[[True] * 3] * 3] * 3)
     dilatedMap = ndimage.binary_dilation(map, structure=dilationStruct)
     surface = dilatedMap * (~ map)
     V, X, Y = np.nonzero(surface)
-    '''maxx, minx = 0, 255
+    ax.set_zlim(0, vlength / compression)
+    ax.set_xlim(0, xlength / compression)
+    ax.set_ylim(0, ylength / compression)
+    ax.scatter(X, Y, V, c=V, alpha=1, s=size)
+    plt.show()
+    # undilated, no 2D surface, just 3D compression:
+    '''
+    map = imresize(map, (vlength/2, xlength/2, ylength/2))
+    map = map.astype(np.uint8)
+    map.resize((vlength / 5, xlength / 5, ylength / 5), refcheck=False)
+    xlength /= compression
+    ylength /= compression
+    vlength /= compression
+    X, Y, V = np.array([]), np.array([]), np.array([])
+    maxx, minx = 0, 255
     for x in xrange(0, xlength):
         for v in xrange(0, vlength):
             for y in xrange(0, ylength):
@@ -62,28 +69,21 @@ def displayValidityMap(map, compression, size):  # v, x, y
                 if map[v*compression][x*compression][y*compression]:
                     X = np.append(X, x)
                     Y = np.append(Y, (ylength-y))
-                    V = np.append(V, v)'''
+                    V = np.append(V, v)
 
     #ax.plot_surface(X, Y, V)
     #R = np.sqrt(X**2 + Y**2)
     #Z = np.sin(R)
     #ax.plot_wireframe(X, Y, V)
     #ax.plot_surface(X, Y, V, rstride=1, cstride=1, color='b')
-    ax.set_zlim(0, vlength/compression)
-    ax.set_xlim(0, xlength/compression)
-    ax.set_ylim(0, ylength/compression)
-    ax.scatter(X, Y, V, c=V, alpha=1, s=size)
-    '''
+
     surf = ax.plot_surface(X, Y, V, rstride=5, cstride=5, cmap=cm.coolwarm,
                            linewidth=0, antialiased=False)
     ax.set_zlim(-1, vlength+1)
-
     ax.zaxis.set_major_locator(LinearLocator(10)) # number of values in legend
     ax.zaxis.set_major_formatter(FormatStrFormatter('%d')) # z-accuracy
-
-    fig.colorbar(surf, shrink=0.5, aspect=5)'''
-
-    plt.show()
+    fig.colorbar(surf, shrink=0.5, aspect=5)
+    plt.show()'''
 
 
 
