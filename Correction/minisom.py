@@ -48,7 +48,8 @@ class MiniSom(object):
             self.weights = self.random_generator.rand(x, y, input_len) * 2 - 1  # random initialization
             print self.weights.shape
         else:
-            self.weights = weights
+            # assumes the weights are on a 0 to 1 scale
+            self.weights = weights * 2 - 1
         for i in range(x):
             for j in range(y):
                 self.weights[i, j] = self.weights[i, j] / fast_norm(self.weights[i, j])  # normalization
@@ -126,17 +127,14 @@ class MiniSom(object):
         """ Trains the SOM picking samples at random from data """
         self._init_T(num_iteration)
         for iteration in range(num_iteration):
-            rand_i = self.random_generator.randint(len(data)) # pick a random sample
+            rand_i = self.random_generator.randint(len(data))  # pick a random sample
             self.update(data[rand_i], self.winner(data[rand_i]), iteration)
 
-    def train_batch(self, data, num_iteration):
+    def train_batch(self, data):
         """ Trains using all the vectors in data sequentially """
-        self._init_T(len(data)*num_iteration)
-        iteration = 0
-        while iteration < num_iteration:
-            idx = iteration % (len(data)-1)
-            self.update(data[idx], self.winner(data[idx]), iteration)
-            iteration += 1
+        self._init_T(len(data))
+        for iteration, datum in enumerate(data):
+            self.update(datum, self.winner(datum), iteration)
 
     def _init_T(self, num_iteration):
         """ Initializes the parameter T needed to adjust the learning rate """
@@ -186,6 +184,10 @@ class MiniSom(object):
         for x in data:
             winmap[self.winner(x)].append(x)
         return winmap
+
+    def closest_weight(self, value):
+        '''  Finds the closest weight to the input value '''
+        return self.weights[self.winner(value)]
 
     @staticmethod
     def cluster_colors(image, node_shape):

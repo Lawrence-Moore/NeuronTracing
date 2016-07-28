@@ -418,16 +418,16 @@ def display_image(image):
     plt.show()
 
 
-def k_means(image, weights=None, n_colors=64):
-    # works better with values between 0 and 1
-    image = np.array(image, dtype=np.float64) / (np.max(image))
+def k_means(image=None, images=None, weights=None, n_colors=64, non_background_sample_percent=.60, threshold=False):
+    neuron_pixels, non_neuron_pixels, image_array, image = sample_data(image, images)
 
-    # reshape so it's 2-D
-    w, h, d = tuple(image.shape)
-    image_array = np.reshape(image, (w * h, d))
+    if threshold:
+        neuron_pixels_sample = shuffle(neuron_pixels, random_state=0)[:int(non_background_sample_percent * neuron_pixels.shape[0])]
+        non_neuron_pixels_sample = shuffle(non_neuron_pixels, random_state=0)[:int(.05 * neuron_pixels.shape[0])]  # get only 5%
+        image_array_sample = np.concatenate((neuron_pixels_sample, non_neuron_pixels_sample))
+    else:
+        image_array_sample = shuffle(image_array, random_state=0)[:int(non_background_sample_percent * image_array.shape[0])]
 
-    # fit on sample
-    image_array_sample = shuffle(image_array, random_state=0)[:1000]
     if weights:
         # reshape weights appropiately. Assumes a list of lists is passed in
         weights = [np.array(weight) for weight in weights]
@@ -439,6 +439,10 @@ def k_means(image, weights=None, n_colors=64):
         kmeans = KMeans(n_clusters=n_colors, n_init=1, init=weights).fit(image_array_sample)
     else:
         kmeans = KMeans(n_clusters=n_colors, random_state=0).fit(image_array_sample)
+
+    # add a cluster for the black
+    # kmeans.cluster_centers_ = np.append(kmeans.cluster_centers_, np.array([[0, 0, 0]]), axis=0)
+    print kmeans.cluster_centers_
 
     # Get labels for all points
     labels = kmeans.predict(image_array)
@@ -454,8 +458,13 @@ def k_means(image, weights=None, n_colors=64):
                 label_idx += 1
         return image
 
+    w, h, d = tuple(image.shape)
     quantized_image = recreate_image(kmeans.cluster_centers_, labels, w, h)
+    codebook_random = shuffle(image_array, random_state=0)[:n_colors + 1]
+    labels_random = pairwise_distances_argmin(codebook_random, image_array, axis=0)
 
+    # return quantized_image, kmeans
+    # Display all results, alongside original image
     plt.figure(1)
     plt.clf()
     ax = plt.axes([0, 0, 1, 1])
@@ -470,10 +479,6 @@ def k_means(image, weights=None, n_colors=64):
     plt.title('Quantized image (64 colors, K-Means)')
     plt.imshow(quantized_image)
 
-    # randomely choose colors
-    codebook_random = shuffle(image_array, random_state=0)[:n_colors + 1]
-    labels_random = pairwise_distances_argmin(codebook_random, image_array, axis=0)
-
     plt.figure(3)
     plt.clf()
     ax = plt.axes([0, 0, 1, 1])
@@ -483,8 +488,10 @@ def k_means(image, weights=None, n_colors=64):
     plt.show()
 
 
-def self_organizing_map(image, weights, n_colors=64, dim=None):
-    if dim is None:
+def self_organizing_map(image=None, images=None, weights=None, n_colors=64, dim=None, sample_perc=.1, threshold=False):
+    neuron_pixels, non_neuron_pixels, pixels, image = sample_data(image, images)
+
+    if dim is None and weights:
         # figure out a way to spread out the nodes of the som
         # find the factor closest to the square root
         factor = get_factor_closest_to_sqrt(len(weights))
@@ -497,20 +504,82 @@ def self_organizing_map(image, weights, n_colors=64, dim=None):
         factor = get_factor_closest_to_sqrt(len(weights))
         dim = (factor, len(weights) / factor)
         weights = np.reshape(weights, (dim[0], dim[1], 3))
-
-    pixels = np.reshape(image, (image.shape[0] * image.shape[1], 3))
+    else:
+        factor = get_factor_closest_to_sqrt(n_colors)
+        # it's prime if the factor is 1
+        if factor == 1:
+            # increase the number of colors by one
+            n_colors += 1
+        # should be fine now
+        factor = get_factor_closest_to_sqrt(n_colors)
+        dim = (factor, n_colors / factor)
 
     # determine the dimensions
-    som = MiniSom(dim[0], dim[1], 3, weights=weights, sigma=0.1, learning_rate=0.2)  # 3x3 = 9 final colors
+    som = MiniSom(dim[0], dim[1], 3, weights=weights, sigma=0.1, learning_rate=0.2)
+    if weights is None:
+        som.random_weights_init(pixels)
 
-    som.train_random(pixels, 100)
+    if threshold:
+        # get mostly bright pixels with a bit of background
+        sample_neuron_pixels = shuffle(neuron_pixels, random_state=0)[:int(sample_perc * neuron_pixels.shape[0])]
+        sample_non_neuron_pixels = shuffle(non_neuron_pixels, random_state=0)[:int(.05 * sample_neuron_pixels.shape[0])]
+        training_pixels = np.concatenate((sample_neuron_pixels, sample_non_neuron_pixels))
+        som.train_batch(training_pixels)
+    else:
+        som.train_random(pixels, 1000)
+
+    # append 0 for background pixels
+    # som.weights = np.reshape(np.append(som.weights, np.zeros((som.weights.shape[0], 3))),
+    #                         (som.weights.shape[0], som.weights.shape[1] + 1, 3))
 
     qnt = som.quantization(pixels)  # quantize each pixels of the image
     clustered = np.zeros(image.shape)
     for i, q in enumerate(qnt):
         clustered[np.unravel_index(i, dims=(image.shape[0], image.shape[1]))] = q
 
-    return clustered * (2 ** 16 - 1)
+    return clustered * np.max(image), som
+
+
+def sample_data(image=None, images=None):
+    if image is None and images is None:
+        raise ValueError('No images were passed in!')
+    if image is not None:
+        # works better with values between 0 and 1
+        image = np.array(image, dtype=np.float64) / (np.max(image))
+
+        # reshape so it's 2-D
+        w, h, d = tuple(image.shape)
+        image_pixels = np.reshape(image, (w * h, d))
+
+        # fit on sample
+        neuron_pixels, non_neuron_pixels = find_non_background_pixels(image, 0)
+    else:
+        all_neuron_pixels = np.zeros((1, 3))
+        sample_non_neuron_pixels = np.zeros((1, 3))
+        # flatten out all the arrays into a single array
+        for image in images:
+            # works better with values between 0 and 1
+            image = np.array(image, dtype=np.float64) / (np.max(image))
+            neuron_pixels, non_neuron_pixels = find_non_background_pixels(image, 0)
+            non_neuron_pixels = shuffle(non_neuron_pixels, random_state=0)[:int(.05 * neuron_pixels.shape[0])]  # keep only a small sample
+            all_neuron_pixels = np.concatenate((all_neuron_pixels, neuron_pixels))
+            sample_non_neuron_pixels = np.concatenate((sample_non_neuron_pixels, non_neuron_pixels))
+
+        # just for consistencies sake, generate the mip
+        image = generate_mip(images)
+        image = np.array(image, dtype=np.float64) / (np.max(image))
+        w, h, d = tuple(image.shape)
+        image_pixels = np.reshape(image, (w * h, d))
+
+    return neuron_pixels, non_neuron_pixels, image_pixels, image
+
+
+def find_non_background_pixels(image, std_multiple=0):
+    r_mask = image[:, :, 0] > np.mean(image[:, :, 0]) + std_multiple * np.std(image[:, :, 0])
+    g_mask = image[:, :, 1] > np.mean(image[:, :, 1]) + std_multiple * np.std(image[:, :, 1])
+    b_mask = image[:, :, 2] > np.mean(image[:, :, 2]) + std_multiple * np.std(image[:, :, 2])
+    overall_mask = np.logical_or.reduce([r_mask, g_mask, b_mask])
+    return image[overall_mask], image[np.logical_not(overall_mask)]
 
 
 def get_factor_closest_to_sqrt(number):

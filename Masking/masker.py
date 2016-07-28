@@ -7,7 +7,7 @@ import time
 # import arrayfire as af
 import numpy as np
 from PIL import Image
-import saving_and_color
+from saving_and_color import rgb2xyv
 import copy
 
 sys.path.append("../Correction")
@@ -118,14 +118,25 @@ class Run(QtGui.QMainWindow):
         radius = self.colorSpace.side / 2
         maps = self.colorSpace.saveStack(saving=False)
 
+        # convert the image into the xyv space
+        img = rgb2xyv(self.mipViews.originalImage, radius, hsv)
 
         # k_means(self.mipViews.originalImage, neuronsList, n_colors=len(neuronsList))
         weights = [np.array(weight) for weight in neuronsList]
         weights = np.vstack(tuple(weights))
 
         # make sure it's on the 0 - 1 scale
-        weights = weights.astype(float) / (255)
-        display_image(self_organizing_map(self.mipViews.originalImage, weights=weights, n_colors=len(weights)))
+        weights = weights.astype(float) / np.max(weights)
+        clustered_img, som = self_organizing_map(img, weights=weights, n_colors=len(weights))
+
+        # go through the color spaces and see how K means and SOM split them
+        # k_means_map = np.zeros(maps.shape)
+        # som_map = np.zeros(maps.shape)
+        # for v in range(maps.shape[0]):
+        #     for x in range(maps.shape[1]):
+        #         for y in range(maps.shape[2]):
+        #             som_map[z, x, y] = som.closest_weight([x, y, v])
+        #             k_means_map = kmeans.predict([[x, y, v]])
 
         # do stuff with list of neuronsList
         # maps = self.colorSpace.saveStack(saving=False)
