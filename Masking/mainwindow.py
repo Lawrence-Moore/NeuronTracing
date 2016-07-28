@@ -186,7 +186,7 @@ class Ui_MainWindow(object):
         MainWindow.setWindowTitle(_translate("MainWindow", "MainWindow", None))
         self.colorSpaceLabel.setText(_translate("MainWindow", "Color Space Selector", None))
         self.volumeSelect.setItemText(0, _translate("MainWindow", "1", None))
-        self.volumeSelect.setItemText(1, _translate("MainWindow", "Add Volume...", None))
+        self.volumeSelect.setItemText(1, _translate("MainWindow", "Add Color...", None))
         self.deleteVolume.setText(_translate("MainWindow", "-", None))
         self.debugLabel.setText(_translate("MainWindow", "DebugView", None))
         self.volumeLabel.setText(_translate("MainWindow", "Colors:", None))

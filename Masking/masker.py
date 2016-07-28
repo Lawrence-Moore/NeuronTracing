@@ -93,6 +93,8 @@ class Run(QtGui.QMainWindow):
             self.colorSpace.createValidityMap()
 
     def maps2ClusteringStart(self):
+        self.colorSpace.rgbClusters2xyvNodes(self.mipViews.originalImage, [[100, 100, 200], [200, 100, 100], [100, 200, 100]])
+        return
         if not self.mipViews.filename:
             return
         dialog = QtGui.QMessageBox(self)
@@ -337,11 +339,6 @@ if __name__ == '__main__':
     sys.exit(app.exec_())
 
 
-# right now
-# color selector in main gui
-# edit image in correctionwin
-
-
 # change log:
 # 6/20: installed needed environments, modules, software
 # 6/21: setup simple interface with graphics and slider widgets
@@ -372,13 +369,49 @@ if __name__ == '__main__':
 # 7/7: created progress bars inside both CorrectWin GUI and main GUI for import
 # 7/8: commented mip module, sped up color space conversion with matrix
     # multiplication as well as remaking the view in main GUI
+# Week of 7/11:
 # 7/11: made saving to-stack operations for both GUIs
 # 7/12: removed dynamic updating of mipDynamic (too slow),
 # 7/12: added more progressbars, saving masked Images to stack and dilating
 # 7/13: created interface to change r, g, b ranges on image
-    # question: doesn't this mess w/the colors hues, etc. that are going to be masked in the other images?
 # 7/14: implemented frame dropping in GUIs, used arrayfire to speed up image editing
 # 7/14: made circular mode autobound, framed mip views
+# Week of 7/18:
+# all exporting and image editing is done with 16uint
+# adjusted for image correction when applying mask to stack
+# made one-area mask apply to all intensities ranging 0-255
+# user controls min/max values of colors with sliders in editimage
+# intuitive color scale behind sliders in editimage
+# saving stack occurs in a file tree, separating colors, mips, dilation
+# clicking on mipfull window averages color from a drawn box around it
+# implemented new colorspaces: hsv-Inverted and rgb, that dynamically switch
+# editwindow pushes its history mip to edit image where user left off
+# tested median filter in dilating image (inactive now due to results)
+# implemented gpu in color scaling in editimage (inactive now due to speed)
+# tested np.vectorize for faster color masking (un-implemented, was slower)
+# three-dimensional plot of validity map in masker gui through dilation
+    # and then subtraction (about 10x faster)
+# min/max field updates only upon user pressing enter for mac and windows
+# added new drawing option: mip to sector in colorspace (set as hsv default)
+# Week of 7/25:
+# implemented free-scaling of masker gui (with floats and simple-gap filling)
+# size of drawn nodes in colorspace in masker gui rescales too
+# implemented gpu function for applying color mask to individual layers and
+# saving stack offers up to a 15-fold increase in performance (2500ms -> 150ms)
+# added interface to delete and merged colors from k-mean clusters
+
+# need to do:
+    # hook color_chooser to masker
+    # convert polygons from clustering to nodes for colorspace view
+    # set to drawingareas. then go through every color/volume and draw currentArea
+    # then, push to display
+# implement frame dropping in adjusting slider in colorspace
+# debug: pictures in icons displaying in windows
+# zoom/edit image in CorrectionWin
+# combine both CorrectionWin and masker GUIs into one gui
+# add preference pane
+# when merging/deleting colors with gui tool, implement quick view into
+# displaying image (offload viewing function from clustering module)
 
 # time-performance log:
 # 6/24: 2D Simple with 200^2 pixels: (MappedMip: 470ms), (Updating: 35ms)
@@ -387,13 +420,8 @@ if __name__ == '__main__':
     # Replaced matplotlib functions in MappedMip with own
     # Updating method switch to manual polygon. (Total slider refresh: 35ms)
 
+
 # to-do:
-# convert colorspace window from (side, 256, side) to (256, 256, 256) and revert back to (256, 256, 2) where 2 = range of xyv, xyv
-# get checking validity map down to under 100ms (creating the map is 40ms at most)
-# use numexpr with original thresholding idea (test2)?
-# make "isolation" into 3D image. then mip it.
-# add multithreading for saving stack
-# combine 2 guis into one file
-# add preference pane
+# do "isolation" with 3D image. then mip it.
 # show map of where you are in the image when zoomed
-########## make backgrounds for sliders for intuition
+# circles: foreground detection, harris corner detection
