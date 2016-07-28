@@ -6,7 +6,7 @@ import saving_and_color
 import cv2
 import tifffile
 from editimage import EditWindow
-import arrayfire as af
+# import arrayfire as af
 import copy
 import sys
 

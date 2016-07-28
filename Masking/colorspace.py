@@ -7,7 +7,7 @@ import cv2
 import matplotlib
 import saving_and_color
 import plotspace
-import arrayfire as af
+# import arrayfire as af
 from PIL import Image
 from color_chooser import ColorChooser
 

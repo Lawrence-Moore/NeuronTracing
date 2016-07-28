@@ -8,7 +8,8 @@ import os
 import math
 import re
 import time
-import arrayfire as af
+# import arrayfire as af
+
 
 def applyToStack(maps, size, opendirectory, boundsinclude, colorMode, gpuMode):
     # initiate a progress bar
@@ -158,6 +159,7 @@ def applyToStack(maps, size, opendirectory, boundsinclude, colorMode, gpuMode):
         bar.setValue(progress)
         QtGui.QApplication.processEvents()
 
+
 def fullGPUMask(cropped, side, validityMap, fullMap):
     width, height = fullMap.shape[1], fullMap.shape[0]
     cropped = cropped.reshape((width * height), 3)
@@ -179,6 +181,7 @@ def fullGPUMask(cropped, side, validityMap, fullMap):
     cropped = np.array(cropped)  # takes 60 ms to convert to numpy (about 40% of function)
     cropped = cropped.reshape(height, width, 3)
     return cropped
+
 
 def rgbCorrection(img, bounds, gpuMode, include):
     # converts a float32 to 8uint arr
@@ -229,6 +232,7 @@ def rgbCorrection(img, bounds, gpuMode, include):
     img = img.astype(np.uint8)
     return img
 
+
 def rgb2xyv(rgb, radius, colorMode, only='Python'):
     hsv = cv2.cvtColor(rgb, cv2.COLOR_RGB2HSV_FULL)
     # hsv = [0-255, 0-255, 0-255]
@@ -254,6 +258,7 @@ def rgb2xyv(rgb, radius, colorMode, only='Python'):
     if only == 'Python':
         return xyv
     return xyv, xyvNumpy
+
 
 def xyv2rgb(xyv, radius, colorMode):
     # note: will accept python list of three numpy x, y, v arrays as separate channels
@@ -284,8 +289,9 @@ def xyv2rgb(xyv, radius, colorMode):
     rgb = rgb.astype(np.uint8)
     return rgb
 
+
 def xyvLst2rgb(xyvLst, radius, colorMode):
-    # converts to hsv: list of 3 ints: hsv color, h:[0, 2pi], s:[0, 1], v:[0, 255]
+
     rgbLst = []
     for [x, y, v] in xyvLst:
         if colorMode == 'hsvI':
@@ -308,6 +314,7 @@ def xyvLst2rgb(xyvLst, radius, colorMode):
         rgbLst.append(rgb)
     return rgbLst
 
+
 def hsvtoxyv(hsv, radius):
     '''
     :param hsv: list of 3 ints: hsv color, h:[0, 2pi], s:[0, 1], v:[0, 255]
@@ -326,6 +333,7 @@ def hsvtoxyv(hsv, radius):
     if y == radius * 2:
         y -= 1
     return [x, y, v]
+
 
 def rgbtohsv(rgb):
     '''
@@ -368,6 +376,7 @@ def rgbtohsv8bit(rgb):
     else:
         h = 42.5 * (((r - g) / delta) + 4)
     return [int(h), int(s), int(v)]
+
 
 def hsv2rgb(hsv):
     '''

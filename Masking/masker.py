@@ -4,11 +4,15 @@ from mainwindow import Ui_MainWindow
 from colorspace import colorSpaces
 from mip import mips
 import time
-import arrayfire as af
+# import arrayfire as af
 import numpy as np
 from PIL import Image
-import saving_and_color
+from saving_and_color import rgb2xyv, xyvLst2rgb
 import copy
+
+sys.path.append("../Correction")
+import minisom
+from image_normalization import k_means, self_organizing_map, display_image
 
 #print af.info()
 sys.setrecursionlimit(50000)  # for packaging into OSX
@@ -110,13 +114,32 @@ class Run(QtGui.QMainWindow):
             return
         self.mipViews.neuronLocating = False
         self.ui.neuronsDoneButton.setVisible(False)
+
+        # neurons list is xyz
         neuronsList = copy.copy(self.mipViews.selectedNeurons)
-        # radius = self.colorSpace.side / 2
-        # colormode = self.colorMode
+        colormode = self.colorMode
+
+        radius = self.colorSpace.side / 2
         # maps = self.colorSpace.saveStack(saving=False)
+
+        # convert the image into the xyv space
+        # img = rgb2xyv(self.mipViews.originalImage, radius, "hsv")
+        img = self.mipViews.originalImage
+
+        # k_means(self.mipViews.originalImage, neuronsList, n_colors=len(neuronsList))
+        neuronsList = xyvLst2rgb(neuronsList, radius, colormode)
+        weights = [np.array(weight) for weight in neuronsList]
+        weights = np.vstack(tuple(weights))
+
+        # make sure it's on the 0 - 1 scale
+        weights = weights.astype(float) / np.max(weights)
+        k_clustered_img, k_centers = self_organizing_map(image=img, n_colors=len(weights), threshold=True)
+        som_clustered_img, som_centers = k_means(image=img, weights=weights, n_colors=len(weights), threshold=True)
         # copy.copy(self.mipViews.boundsInclude) -> this is for image correction
+
         # do stuff with variables above
         # clean up:
+
         self.mipViews.selectedNeurons = []
         self.mipViews.updateMipView()
 
