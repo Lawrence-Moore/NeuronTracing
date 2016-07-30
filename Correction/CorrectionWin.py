@@ -283,8 +283,10 @@ class Correction(QtGui.QMainWindow):
                 img = self.unalignedImages[1][self.indexLayer][self.ui.channelSelectMenu.currentIndex()].scaled(width, height)
         else:
             if self.ui.thresholdMode.isChecked():
+                print 'should never be here...'
                 img = self.alignedImages[1][self.indexLayer].scaled(width, height)
             else:
+                print self.alignMode, self.indexLayer
                 img = self.alignedImages[0][self.indexLayer].scaled(width, height)
         pixmap = QtGui.QPixmap.fromImage(img)
         pixitem = QtGui.QGraphicsPixmapItem(pixmap)

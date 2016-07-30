@@ -9,6 +9,7 @@ import saving_and_color
 import plotspace
 # import arrayfire as af
 from PIL import Image
+from color_chooser import ColorChooser
 
 # Docstring Format:
 # Param ArgName: (ArgType:) Description
@@ -441,7 +442,7 @@ class colorSpaces():
             radius = self.side / 2
             # uses x,y coordinates on plane to find h,s locations in HSV cylinder
             # and then paints rgb color at x,y location from h,s,v=255
-            line= np.arange(0, self.side, 1, dtype=np.float32)
+            line = np.arange(0, self.side, 1, dtype=np.float32)
             y = np.expand_dims(line, axis=1)
             y = np.repeat(y, self.side, axis=1)
             x = np.expand_dims(line, axis=0)
@@ -555,10 +556,10 @@ class colorSpaces():
         copy.deepcopy(self.areaViewPoints), copy.deepcopy(self.drawingAreas),
                                           copy.copy(self.indexArea)]
         self.indexVolume = self.volumeMenu.currentIndex()
-        if text == 'Add Volume...':
+        if text == 'Add Color...':
             self.volumes.append([])
             self.volumeMenu.setItemText(self.indexVolume, QtCore.QString('%d' % (self.indexVolume + 1)))
-            self.volumeMenu.addItem(QtCore.QString('Add Volume...'))
+            self.volumeMenu.addItem(QtCore.QString('Add Color...'))
             self.areas, self.areaViewPoints, self.drawingAreas = [False], [], [False]
             self.currentArea, self.indexArea, self.manualSelected = [], 0, -1
         else:
@@ -570,7 +571,7 @@ class colorSpaces():
         self.createValidityMap()
 
     def deleteVolume(self):
-        if self.volumeMenu.currentText() == 'Add Volume...':
+        if self.volumeMenu.currentText() == 'Add Color...':
             return
         elif self.volumeMenu.currentIndex == 0:
             del self.volumes[0]
@@ -583,7 +584,8 @@ class colorSpaces():
             self.indexVolume -= 1  # move for appearance + not stuck at end
         self.volumeMenu.setCurrentIndex(self.indexVolume)
         [self.areas, self.areaViewPoints, self.drawingAreas, self.indexArea] = self.volumes[self.indexVolume]
-        self.currentArea = self.drawingAreas[self.indexArea][1]
+        if self.drawingAreas[self.indexArea]:
+            self.currentArea = self.drawingAreas[self.indexArea][1]
         self.refreshAreaSpace()
         self.createValidityMap()
 
@@ -811,6 +813,12 @@ class colorSpaces():
         self.currentArea = self.currentArea.astype(np.uint16)
         self.currentArea = self.currentArea.tolist()
         self.updateColorSpaceView(forced=True)
+
+    def rgbClusters2xyvNodes(self, mipImage, rgbList):
+        # this only works in 'hsv' mode right now
+        self.chooser = ColorChooser(mipImage, rgbList, parent=self)
+        self.chooser.show()
+        # convert (h, s) coordinates to (x, y, 255) coordinates
 
 
 

@@ -356,6 +356,27 @@ def rgbtohsv(rgb):
         h = 60 * (((r - g) / delta) + 4)
     return [h, s, int(v * 255)]
 
+def rgbtohsv8bit(rgb):
+    '''
+    :param rgb: list of 3 ints: rgb color, r:[0, 255], g:[0, 255], g:[0, 255]
+    :return: hsv: list of 3 ints: hsv color, h:[0, 255], s:[0, 255], v:[0, 255]
+    '''
+    [r, g, b] = rgb
+    v = max(rgb)
+    if v == 0:
+        return [0, 0, 0]
+    delta = v - min(rgb)
+    s = (delta / float(v)) * 255
+    if delta == 0:
+        return [0, s, int(v * 255)]
+    if v == r:
+        h = 42.5 * (((g - b) / delta) % 6)
+    elif v == g:
+        h = 42.5 * (((b - r) / delta) + 2)
+    else:
+        h = 42.5 * (((r - g) / delta) + 4)
+    return [int(h), int(s), int(v)]
+
 
 def hsv2rgb(hsv):
     '''
