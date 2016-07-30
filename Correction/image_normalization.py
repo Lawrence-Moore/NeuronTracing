@@ -473,7 +473,8 @@ def k_means(image=None, images=None, weights=None, n_colors=64, non_background_s
 
 
 def self_organizing_map(image=None, images=None, weights=None, n_colors=64, dim=None, sample_perc=.1, threshold=False):
-    neuron_pixels, non_neuron_pixels, pixels, image = sample_data(image, images)
+    std_multiple = 0  # if thresholding, what multiple of the standard deviation plus the mean should be used as the threshold value
+    neuron_pixels, non_neuron_pixels, pixels, image = sample_data(image, images, std_multiple=std_multiple)
 
     if dim is None and weights is not None:
         # figure out a way to spread out the nodes of the som
@@ -505,9 +506,9 @@ def self_organizing_map(image=None, images=None, weights=None, n_colors=64, dim=
 
     if threshold:
         # get mostly bright pixels with a bit of background
-        som.train_random(neuron_pixels, 1000)
+        som.train_random(neuron_pixels, 10000)
     else:
-        som.train_random(pixels, 1000)
+        som.train_random(pixels, 10000)
 
     # append 0 for background pixels
     # som.weights = np.reshape(np.append(som.weights, np.zeros((som.weights.shape[0], 3))),
@@ -527,10 +528,10 @@ def self_organizing_map(image=None, images=None, weights=None, n_colors=64, dim=
     ax.set_title('After SOM Clustering')
     plt.show()
 
-    return clustered, som.weights
+    return clustered, np.reshape(som.weights, (som.weights.shape[0] * som.weights.shape[1], 3))
 
 
-def sample_data(image=None, images=None):
+def sample_data(image=None, images=None, std_multiple=0):
     if image is None and images is None:
         raise ValueError('No images were passed in!')
     if image is not None:
@@ -542,7 +543,8 @@ def sample_data(image=None, images=None):
         image_pixels = np.reshape(image, (w * h, d))
 
         # fit on sample
-        neuron_pixels, non_neuron_pixels = find_non_background_pixels(image, 0)
+        mask = find_non_background_pixels(image, std_multiple)
+        neuron_pixels, non_neuron_pixels = image[mask], image[np.logical_not(mask)]
     else:
         all_neuron_pixels = np.zeros((1, 3))
         sample_non_neuron_pixels = np.zeros((1, 3))
@@ -550,7 +552,8 @@ def sample_data(image=None, images=None):
         for image in images:
             # works better with values between 0 and 1
             image = np.array(image, dtype=np.float64) / (np.max(image))
-            neuron_pixels, non_neuron_pixels = find_non_background_pixels(image, 0)
+            mask = find_non_background_pixels(image, std_multiple)
+            neuron_pixels, non_neuron_pixels = image[mask], image[np.logical_not(mask)]
             non_neuron_pixels = shuffle(non_neuron_pixels, random_state=0)[:int(.05 * neuron_pixels.shape[0])]  # keep only a small sample
             all_neuron_pixels = np.concatenate((all_neuron_pixels, neuron_pixels))
             sample_non_neuron_pixels = np.concatenate((sample_non_neuron_pixels, non_neuron_pixels))
@@ -568,8 +571,7 @@ def find_non_background_pixels(image, std_multiple=0):
     r_mask = image[:, :, 0] > np.mean(image[:, :, 0]) + std_multiple * np.std(image[:, :, 0])
     g_mask = image[:, :, 1] > np.mean(image[:, :, 1]) + std_multiple * np.std(image[:, :, 1])
     b_mask = image[:, :, 2] > np.mean(image[:, :, 2]) + std_multiple * np.std(image[:, :, 2])
-    overall_mask = np.logical_or.reduce([r_mask, g_mask, b_mask])
-    return image[overall_mask], image[np.logical_not(overall_mask)]
+    return np.logical_or.reduce([r_mask, g_mask, b_mask])
 
 
 def get_factor_closest_to_sqrt(number):
