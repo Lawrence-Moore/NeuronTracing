@@ -490,14 +490,17 @@ def self_organizing_map(image=None, images=None, weights=None, n_colors=64, dim=
         dim = (factor, len(weights) / factor)
         weights = np.reshape(weights, (dim[0], dim[1], 3))
     else:
-        factor = get_factor_closest_to_sqrt(n_colors)
-        # it's prime if the factor is 1
-        if factor == 1:
-            # increase the number of colors by one
-            n_colors += 1
-        # should be fine now
-        factor = get_factor_closest_to_sqrt(n_colors)
-        dim = (factor, n_colors / factor)
+        if n_colors == 2 or n_colors == 3:
+            dim = (1, n_colors)
+        else:
+            factor = get_factor_closest_to_sqrt(n_colors)
+            # it's prime if the factor is 1
+            if factor == 1:
+                # increase the number of colors by one
+                n_colors += 1
+            # should be fine now
+            factor = get_factor_closest_to_sqrt(n_colors)
+            dim = (factor, n_colors / factor)
 
     # determine the dimensions
     som = MiniSom(dim[0], dim[1], 3, weights=weights, sigma=0.1, learning_rate=0.2)
