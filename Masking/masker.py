@@ -4,7 +4,7 @@ from mainwindow import Ui_MainWindow
 from colorspace import colorSpaces
 from mip import mips
 import time
-# import arrayfire as af
+import arrayfire as af
 import numpy as np
 from PIL import Image
 from saving_and_color import rgb2xyv, xyvLst2rgb
@@ -52,7 +52,7 @@ class Run(QtGui.QMainWindow):
         self.ui.deleteVolume.clicked.connect(self.colorSpace.deleteVolume)
         self.ui.addAreaButton.clicked.connect(self.colorSpace.addArea)
         self.ui.delAreaButton.clicked.connect(self.colorSpace.deleteArea)
-        self.ui.volumeSelect.activated[str].connect(self.colorSpace.volumeChange) # handles multiple color-space volumes
+        self.ui.volumeSelect.activated[str].connect(self.colorSpace.changeVolume)  # handles multiple color-space volumes
         self.ui.areaSelectionView.viewport().installEventFilter(self)
         # add signals for mipDynamic view
         self.ui.mipDynamic.viewport().installEventFilter(self)
@@ -97,12 +97,10 @@ class Run(QtGui.QMainWindow):
             self.colorSpace.createValidityMap()
 
     def maps2ClusteringStart(self):
-        self.colorSpace.rgbClusters2xyvNodes(self.mipViews.originalImage, [[100, 100, 200], [200, 100, 100], [100, 200, 100]])
-        return
         if not self.mipViews.filename:
             return
-        dialog = QtGui.QMessageBox(self)
-        dialog.setText(QtCore.QString('Choose Neurons/Colors from MIP Full View'
+        dialog = QtGui.QMessageBox(self)  ############## showing this should be in preferences
+        dialog.setText(QtCore.QString('Choose Neurons/Colors from either MIP View'
             '. When you are finished, press done.'))
         dialog.show()
         self.ui.neuronsDoneButton.setVisible(True)
@@ -115,7 +113,7 @@ class Run(QtGui.QMainWindow):
         self.mipViews.neuronLocating = False
         self.ui.neuronsDoneButton.setVisible(False)
 
-        # neurons list is xyz
+        # neurons list is xyv
         neuronsList = copy.copy(self.mipViews.selectedNeurons)
         colormode = self.colorMode
 
@@ -133,13 +131,17 @@ class Run(QtGui.QMainWindow):
 
         # make sure it's on the 0 - 1 scale
         weights = weights.astype(float) / np.max(weights)
-        k_clustered_img, k_centers = self_organizing_map(image=img, n_colors=len(weights), threshold=True)
-        som_clustered_img, som_centers = k_means(image=img, weights=weights, n_colors=len(weights), threshold=True)
+        k_clustered_img, k_centers = k_means(image=img, n_colors=len(weights), threshold=True)
+        # som_clustered_img, som_centers = self_organizing_map(image=img, weights=weights, n_colors=len(weights), threshold=True)
+        k_centers *= 256
+        rgbList = k_centers.astype(np.uint8)
+        rgbList = rgbList.tolist()
+        # self.colorSpace.rgbClusters2Chooser(self.mipViews.originalImage.copy(), (rgbList + neuronsList))
+        self.colorSpace.rgbClusters2Chooser(self.mipViews.originalImage.copy(), self.mipViews.boundsInclude, rgbList)
         # copy.copy(self.mipViews.boundsInclude) -> this is for image correction
 
         # do stuff with variables above
         # clean up:
-
         self.mipViews.selectedNeurons = []
         self.mipViews.updateMipView()
 
@@ -165,14 +167,18 @@ class Run(QtGui.QMainWindow):
         x = width / 2
         y = 15
         side = (height / 2) - 30
+        fside, dside = side, side
+        maximumFullSize = 750 ########################### to be changed in preferences
+        if self.gpuMode and side > maximumFullSize:
+            fside, dside = maximumFullSize, (2 * side - maximumFullSize)
         self.ui.mipFull.move(x, y)
-        self.ui.mipFull.resize(side, side)
-        self.ui.mipDynamic.move(x, (height / 2))
-        ax, ay = x + side + 10, (height / 2) + side - self.ui.maps2ClusteringButton.height()
+        self.ui.mipFull.resize(fside, fside)
+        self.ui.mipDynamic.move(x, fside + 30)
+        ax, ay = x + dside + 10, fside + 30 + dside - self.ui.maps2ClusteringButton.height()
         self.ui.maps2ClusteringButton.move(ax, ay)
         self.ui.neuronsDoneButton.move(ax, ay - self.ui.neuronsDoneButton.height() - 5)
-        self.ui.mipDynamic.resize(side, side)
-        x += side + 10
+        self.ui.mipDynamic.resize(dside, dside)
+        x += fside + 10
         bside, bseparation = side * .08, side * .1
         self.ui.editImageButton.move(x, y)
         self.ui.editImageButton.resize(bside, bside)
@@ -266,13 +272,13 @@ class Run(QtGui.QMainWindow):
             self.colorSpace.updateManualBoundary(radius, radius, False)
 
     def eventFilter(self, source, event):
-        # respond to mouse events in colorSpace after importing file to mipViews
-        if source == self.ui.colorSpace.viewport():
-            try:  # if nothing has been imported yet
-                if not self.mipViews.filename:
-                    return False
-            except:  # if mipViews hasn't been created yet
+        # respond to mouse events in colorSpace only after importing file to mipViews
+        try:  # if nothing has been imported yet
+            if not self.mipViews.filename:
                 return False
+        except:  # if mipViews hasn't been created yet
+            return False
+        if source == self.ui.colorSpace.viewport():
             if self.colorSpace.areaMode == 'auto':
                 if event.type() == QtCore.QEvent.MouseButtonPress:
                     self.colorSpace.mouseHold = True
@@ -315,7 +321,7 @@ class Run(QtGui.QMainWindow):
                 elif event.type() == QtCore.QEvent.MouseMove and self.colorSpace.mouseHold:
                     pos = event.pos()
                     self.colorSpace.circularRadius(pos.x(), pos.y())
-                elif event.type() == QtCore.QEvent.MouseButtonRelease:
+                elif event.type() == QtCore.QEvent.MouseButtonRelease and len(self.colorSpace.currentArea) > 1:
                     self.colorSpace.mouseHold = False
                     pos = event.pos()
                     self.colorSpace.circularRadius(pos.x(), pos.y())
@@ -329,16 +335,23 @@ class Run(QtGui.QMainWindow):
                 == QtCore.QEvent.MouseButtonPress:
             pos = event.pos()
             self.colorSpace.getPreviousArea(pos.x(), pos.y())
-        elif source == self.ui.mipFull.viewport() and event.type() == QtCore.QEvent.MouseButtonPress:
+        elif (source == self.ui.mipDynamic.viewport() or source == self.ui.mipFull.viewport())\
+                and event.type() == QtCore.QEvent.MouseButtonPress:
+            if source == self.ui.mipDynamic.viewport():
+                fullView = False
+            else:
+                fullView = True
+            print fullView
             pos = event.pos()
             if self.mipViews.neuronLocating:
-                self.mipViews.getNeuronLocation(pos.x(), pos.y(), True)
+                self.mipViews.getNeuronLocation(pos.x(), pos.y(), fullView, True)
             else:
-                xyv = self.mipViews.getNeuronLocation(pos.x(), pos.y())
+                xyv = self.mipViews.getNeuronLocation(pos.x(), pos.y(), fullView)
                 if self.colorMode == 'rgb' or self.colorSpace.areaMode == 'circular':
                     self.colorSpace.circularFromMip(xyv)
                 else:
                     self.colorSpace.sectorFromMip(xyv)
+        # this has been effectively nullified by clicking on mipDynamic to neuron selecting above:
         elif source == self.ui.mipDynamic.viewport() and event.type() == QtCore.QEvent.MouseButtonPress:
             pos = event.pos()
             self.mipViews.getDynamicPoint(pos.x(), pos.y())
@@ -421,20 +434,23 @@ if __name__ == '__main__':
 # size of drawn nodes in colorspace in masker gui rescales too
 # implemented gpu function for applying color mask to individual layers and
 # saving stack offers up to a 15-fold increase in performance (2500ms -> 150ms)
-# added interface to delete and merged colors from k-mean clusters
+# added interface to delete, split, view, merge colors from k-mean clusters
+# implemented frame dropping in adjusting slider in colorspace
 
 # need to do:
     # hook color_chooser to masker
     # convert polygons from clustering to nodes for colorspace view
     # set to drawingareas. then go through every color/volume and draw currentArea
     # then, push to display
-# implement frame dropping in adjusting slider in colorspace
+# debug: delete the last color does not update dynamic
+# add apply2stack feature in k-means
 # debug: pictures in icons displaying in windows
 # zoom/edit image in CorrectionWin
 # combine both CorrectionWin and masker GUIs into one gui
 # add preference pane
 # when merging/deleting colors with gui tool, implement quick view into
 # displaying image (offload viewing function from clustering module)
+# for zoom/pan, scroll into/out of the mouse position
 
 # time-performance log:
 # 6/24: 2D Simple with 200^2 pixels: (MappedMip: 470ms), (Updating: 35ms)
@@ -448,3 +464,4 @@ if __name__ == '__main__':
 # do "isolation" with 3D image. then mip it.
 # show map of where you are in the image when zoomed
 # circles: foreground detection, harris corner detection
+# click on neuron and recursively trace its shape by a functon of (r, g, b, x, y) distance
