@@ -8,10 +8,12 @@ import os
 import math
 import re
 import time
-# import arrayfire as af
+import arrayfire as af
 
 
 def applyToStack(maps, size, opendirectory, boundsinclude, colorMode, gpuMode):
+    if colorMode == 'rgbClusters':
+        [merges, modified, maps] = maps
     # initiate a progress bar
     bar = QtGui.QProgressBar()
     bar.setWindowTitle(QtCore.QString('Applying Mask to Stack...'))
@@ -28,9 +30,9 @@ def applyToStack(maps, size, opendirectory, boundsinclude, colorMode, gpuMode):
             if len(numbers) != 1:
                 error = QtGui.QMessageBox()
                 error.setText(QtCore.QString('Error! One or more of the input'
-                    ' files contains 0 or >1 numbers in the filename, which'
-                    ' are necessary for indexing Tifs by their z-layer. '
-                    'Aborting...'))
+                    ' files does not contain exactly 1 number in the filename, which'
+                    ' is necessary for indexing Tifs by their z-layer. '
+                    'Aborting Save...'))
                 error.exec_()
                 return
             fileIndices.append(int(numbers[0]))
@@ -72,41 +74,67 @@ def applyToStack(maps, size, opendirectory, boundsinclude, colorMode, gpuMode):
             original = tif.asarray()
         if original.shape[2] == 4:
             original = original[:, :, 0:3]
-        originalStack.append(original)
         assert (original.dtype != np.uint8)
         if boundsinclude == [[[0, 127, 255], [0, 127, 255], [0, 127, 255]], [True, True, True]]:
             rgb = original.copy()
             rgb /= 256
             rgb = rgb.astype(np.uint8)
-        else:
+        else:   # apply correction to rgb
             [bounds, include] = boundsinclude
-            mappedImage = rgbCorrection(original.astype(np.float32), bounds, False, include)  # apply correction to rgb
-        if colorMode != 'rgb':
+            mappedImage, original = rgbCorrection(original.astype(np.float32), bounds, False, include, both=True)
+        originalStack.append(original)
+        if colorMode[0:3] != 'rgb':  # it's not 'rgb' or 'rgbClusters'
             if gpuMode:
                 mappedImage = rgb2xyv(rgb, radius, colorMode, only='Numpy')
             else:
                 mappedImage = rgb2xyv(rgb, radius, colorMode)
         height, width, numcolors = original.shape
-        original = original.reshape((height * width), numcolors)
+        if colorMode != 'rgbClusters':
+            original = original.reshape((height * width), numcolors)
         if numcolors == 3:
             black = [0, 0, 0]
         elif numcolors == 4:
             black = [0, 0, 0, 255]
         for color, map in enumerate(maps):
             # process the array
-            if gpuMode:
-                cropped = fullGPUMask(original, size, map, mappedImage)
+            if colorMode == 'rgbClusters':
+                # maps = self.rgbList
+                cropped = original.copy()
+                mipFloat = mappedImage.astype(np.float32)
+                raxis, gaxis, baxis = np.split(mipFloat, 3, axis=2)
+                stack = [map]
+                for [mc, mcs] in merges:
+                    if mc == rgb:
+                        stack = mcs
+                        break
+                if stack[0] not in modified:
+                    continue
+                fullMask = False
+                for [r, g, b] in stack:
+                    mask = True
+                    dist = ((raxis - r) ** 2 + (gaxis - g) ** 2 + (baxis - b) ** 2)
+                    for [ar, ag, ab] in maps:
+                        if [ar, ag, ab] == [r, g, b]:  # don't compare with one's self
+                            continue
+                        adist = ((raxis - ar) ** 2 + (gaxis - ag) ** 2 + (baxis - ab) ** 2)
+                        mask *= dist <= adist
+                    fullMask += mask
+                fullMask = np.repeat(fullMask, numcolors, axis=2)
+                cropped[~fullMask] = 0
             else:
-                cropped = original.copy()  # what is to be saved
-                indices = []
-                for py in xrange(0, height):
-                    yshift = py * width
-                    for px in xrange(0, width):
-                        [a, b, c] = mappedImage[py][px]
-                        if not map[c, a, b]:
-                            indices.append((yshift + px))
-                cropped[indices] = black  # set pixels to black
-                cropped = cropped.reshape(height, width, numcolors)  # reshape back to normal
+                if gpuMode:
+                    cropped = fullGPUMask(original, size, map, mappedImage)
+                else:
+                    cropped = original.copy()  # what is to be saved
+                    indices = []
+                    for py in xrange(0, height):
+                        yshift = py * width
+                        for px in xrange(0, width):
+                            [a, b, c] = mappedImage[py][px]
+                            if not map[c, a, b]:
+                                indices.append((yshift + px))
+                    cropped[indices] = black  # set pixels to black
+                    cropped = cropped.reshape(height, width, numcolors)  # reshape back to normal
             # save the array as tif
             tifffile.imsave((saveUndilatedDir + ('Color%d/' % (color+1)) + file), cropped)
             # save the numpy array into numpystack
@@ -127,7 +155,7 @@ def applyToStack(maps, size, opendirectory, boundsinclude, colorMode, gpuMode):
     dim3bools = []
     for color in numpystacks:
         rgb3D = np.array(color)
-        bool3D = rgb3D[:, :, :, 0] > 0
+        bool3D = (rgb3D[:, :, :, 0] > 0) + (rgb3D[:, :, :, 1] > 0) + (rgb3D[:, :, :, 2] > 0)
         dim3bools.append(bool3D)
     dilationStruct = np.array([[[False, False, False], [False, True, False], [False, False, False]],  # z = -1
                               [[False, True, False], [True, True, True], [False, True, False]],  # z = 0
@@ -183,7 +211,7 @@ def fullGPUMask(cropped, side, validityMap, fullMap):
     return cropped
 
 
-def rgbCorrection(img, bounds, gpuMode, include):
+def rgbCorrection(img, bounds, gpuMode, include, both=False):  # both refers to 8bit and 16bit returns, 8 is default
     # converts a float32 to 8uint arr
     r, g, b = img[:, :, 0], img[:, :, 1], img[:, :, 2]
     for c, color in enumerate([r, g, b]):
@@ -228,8 +256,11 @@ def rgbCorrection(img, bounds, gpuMode, include):
             undermid = undermid.reshape(height, width)
         color = undermid + overmid
         img[:, :, c] = color
+    full16img = img.astype(np.uint16)
     img /= 256
     img = img.astype(np.uint8)
+    if both:
+        return img, full16img
     return img
 
 
@@ -291,9 +322,9 @@ def xyv2rgb(xyv, radius, colorMode):
 
 
 def xyvLst2rgb(xyvLst, radius, colorMode):
-
     rgbLst = []
     for [x, y, v] in xyvLst:
+        x, y = float(x), float(y)
         if colorMode == 'hsvI':
             dx = 1 - x / radius
             dy = y / radius - 1
@@ -310,8 +341,9 @@ def xyvLst2rgb(xyvLst, radius, colorMode):
             if s < 0:
                 s = 0
         h = math.atan2(dy, dx) + math.pi
+        # hsv color, h:[0, 2pi], s:[0, 1], v:[0, 255]
         rgb = hsv2rgb([h, s, v])
-        rgbLst.append(rgb)
+        rgbLst.append(list(rgb))
     return rgbLst
 
 
@@ -344,7 +376,7 @@ def rgbtohsv(rgb):
     v = max(rgb)
     if v == 0:
         return [0, 0, 0]
-    delta = v - min(rgb)
+    delta = float(v - min(rgb))
     s = delta / v
     if delta == 0:
         return [0, s, int(v * 255)]
@@ -354,7 +386,7 @@ def rgbtohsv(rgb):
         h = 60 * (((b - r) / delta) + 2)
     else:
         h = 60 * (((r - g) / delta) + 4)
-    return [h, s, int(v * 255)]
+    return [int(h), s, int(v * 255)]
 
 def rgbtohsv8bit(rgb):
     '''
@@ -365,8 +397,8 @@ def rgbtohsv8bit(rgb):
     v = max(rgb)
     if v == 0:
         return [0, 0, 0]
-    delta = v - min(rgb)
-    s = (delta / float(v)) * 255
+    delta = float(v - min(rgb))
+    s = (delta / v) * 255
     if delta == 0:
         return [0, s, int(v * 255)]
     if v == r:

@@ -6,7 +6,6 @@ import saving_and_color
 import cv2
 import tifffile
 from editimage import EditWindow
-# import arrayfire as af
 import copy
 import sys
 
@@ -39,29 +38,44 @@ class mips():
         # whether neuron locations
         self.neuronLocating = False
         self.selectedNeurons = []
+        self.fullNeuronLocatingView = False
         self.colorMode = colormode
 
-    def getNeuronLocation(self, mx, my, neuronSelecting=False):
+    def getNeuronLocation(self, mx, my, fullView, neuronSelecting=False):
         if not self.filename:
             return
-        viewWidth, viewHeight = self.fullView.width(), self.fullView.height()
+        if neuronSelecting:
+            resetMask = False
+        else:
+            resetMask = True
+        if fullView:
+            viewWidth, viewHeight = self.fullView.width(), self.fullView.height()
+            if not self.fullNeuronLocatingView:
+                resetMask = True
+            self.fullNeuronLocatingView = True
+
+        else:  # assume its dynamicView
+            viewWidth, viewHeight = self.dynamicView.width(), self.dynamicView.height()
+            if self.fullNeuronLocatingView:
+                resetMask = True
+            self.fullNeuronLocatingView = False
         fracMx, fracMy = float(mx) / viewWidth, float(my) / viewHeight
         [xi, yi, xf, yf] = self.croparea
         width, height = xf - xi, yf - yi
         px, py = int(fracMx * width + xi), int(fracMy * height + yi)
-        cx, cy, cv = self.mappedNumpyMip[py][px]
         # get array of this square around it in 5x5 pixel fashion
         r = 5
         cropped = self.mappedNumpyMip[(py - r):(py + r), (px - r):(px + r)]
         x, y, v = cropped[:, :, 0], cropped[:, :, 1], cropped[:, :, 2]
+        cx, cy, cv = np.median(x).astype(int), np.median(y).astype(int), np.median(v).astype(int)
         dxy = self.colorSpace.width() / 20
         x[abs(x - cx) > dxy] = cx
         y[abs(y - cy) > dxy] = cy
         v[v < 100] = cv
-        avgX, avgY, avgV = np.mean(x).astype(int), np.mean(y).astype(int), np.mean(v).astype(int)
+        avgX, avgY, avgV = np.median(x).astype(int), np.median(y).astype(int), np.max(v).astype(int)
         ########
-        if type(self.selectionMask) is bool:
-            self.selectionMask = QtGui.QImage(self.fullView.width(), self.fullView.width(), QtGui.QImage.Format_ARGB32)  # this assumes fullView and dynamicView are congruent
+        if type(self.selectionMask) is bool or resetMask:
+            self.selectionMask = QtGui.QImage(viewWidth, viewHeight, QtGui.QImage.Format_ARGB32)  # this assumes fullView and dynamicView are congruent
             self.selectionMask.fill(QtGui.qRgba(0, 0, 0, 0))
         px, py = float(px), float(py)
         left = int((((px - r) - xi) / width) * viewWidth - 1)
@@ -81,7 +95,6 @@ class mips():
         self.updateMipView(cleanMask=False)
         if neuronSelecting:
             self.selectedNeurons.append([avgX, avgY, avgV])
-            print self.selectedNeurons
             return
         return [avgX, avgY, avgV]
 
@@ -92,12 +105,12 @@ class mips():
         dynamicView.
         '''
         dialog = QtGui.QFileDialog()
-        self.filename = str(dialog.getOpenFileName())
-        if not self.filename:  # user pressed cancel
+        filename = str(dialog.getOpenFileName())
+        if not filename:  # user pressed cancel
             return
+        self.filename = filename
         self.boundsInclude = [[[0, 127, 255], [0, 127, 255], [0, 127, 255]], [True, True, True]]
         self.croparea = False
-        QtGui.QApplication.processEvents()
         self.validityMap = False
         self.createMipView()  # create the views for Mip full
         self.createMappedMip()
@@ -136,7 +149,7 @@ class mips():
         scene.setSceneRect(0, 0, self.fullView.width(), self.fullView.height())
         pic = QtGui.QPixmap.fromImage(resizedImg)
         scene.addItem(QtGui.QGraphicsPixmapItem(pic))
-        if type(self.selectionMask) is not bool:
+        if type(self.selectionMask) is not bool and self.fullNeuronLocatingView:
             img = self.selectionMask.copy()  # b/c selectionMask is destroyed after use
             pixmap = QtGui.QPixmap.fromImage(img)
             scene.addItem(QtGui.QGraphicsPixmapItem(pixmap))
@@ -175,8 +188,6 @@ class mips():
         black, an RGBA of (0, 0, 0, 0).
         :return:
         '''
-        if not self.neuronLocating:
-            self.selectionMask = False
         if type(map) is bool:
             # if this module doesn't have its copy of the validity map and one
             # wasn't passed in (map=False), don't crop anything and redraw
@@ -235,7 +246,6 @@ class mips():
                         indices.append((yshift + px))
                     mx += fracw
                 my += frach
-
         cropped[indices] = [0, 0, 0]  # set pixels to black
         cropped = cropped.reshape(height, width, 3)  # reshape back to normal
         if retrn:
@@ -347,7 +357,8 @@ class mips():
         scene.setSceneRect(0, 0, self.dynamicView.width(), self.dynamicView.height())
         pic = QtGui.QPixmap.fromImage(img)
         scene.addItem(QtGui.QGraphicsPixmapItem(pic))  # add image to scene
-        if type(self.selectionMask) is not bool:
+        if type(self.selectionMask) is not bool and not self.fullNeuronLocatingView:
+            print 'i got added!'
             img = self.selectionMask.copy()  # b/c selectionMask is destroyed after use
             pixmap = QtGui.QPixmap.fromImage(img)
             scene.addItem(QtGui.QGraphicsPixmapItem(pixmap))

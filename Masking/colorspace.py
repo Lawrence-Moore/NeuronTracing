@@ -7,7 +7,7 @@ import cv2
 import matplotlib
 import saving_and_color
 import plotspace
-# import arrayfire as af
+import arrayfire as af
 from PIL import Image
 from color_chooser import ColorChooser
 
@@ -66,7 +66,7 @@ class colorSpaces():
         # of colorspace that represents mask with bool:True/False
         self.nodeSize = [-2, 3]  # size of nodes drawn in colorspace
         self.validityMap = False
-        self.doneDrawing = True  # implementation of dropped frames in colorspace view
+        self.doneDrawing = True  # frame dropping for manualUpdate
 
     def addDynamicView(self, update):
         '''
@@ -112,24 +112,51 @@ class colorSpaces():
             for dy in xrange(self.nodeSize[0], self.nodeSize[1]):
                 self.currentImage.setPixel(px + dx, py + dy, color)
 
-    def sectorFromMip(self, xyv):
+    def sectorFromMip(self, xyv):  # xyv= either [x, y, v] or [di, df] in degrees
         self.currentArea = []
-        [x, y, v] = xyv
-        self.silentSliderSet(v)
         center = self.side / 2
-        self.currentArea.append([center, center])
-        x -= center
-        y -= center
-        degrees = math.atan2(y, x)
-        degreeBuffer = 0.35  # in radians, 0.4 = 45 degrees
-        dI, dF = degrees - degreeBuffer, degrees + degreeBuffer
-        xIUnit, yIUnit = math.cos(dI), math.sin(dI)
-        xFUnit, yFUnit = math.cos(dF), math.sin(dF)
+        angleBuffer = 0.35  # in radians, 0.4 = 45 degrees #### in preferences
+        circle = 2 * math.pi
+        if len(xyv) == 3:
+            [x, y, v] = xyv
+            self.silentSliderSet(v)
+            self.currentArea.append([center, center])
+            x -= center
+            y -= center
+            angle = math.atan2(y, x)
+            aI, aF = angle - angleBuffer, angle + angleBuffer
+            aI, aF = aI % circle, aF % circle
+            angles = [angle]
+        elif len(xyv) == 2:
+            [aI, aF] = xyv
+            aI, aF = 255 - aF, 255 - aI  # b/c our h in hsv is flipped
+            aI, aF = aI * 0.024639942381096416, aF * 0.024639942381096416  # to radians
+            angles = []
+            circle = 2 * math.pi
+            def splitter(i, f):  # recursive degree splitter
+                if f > i:
+                    dAngle = f - i
+                    angle = (i + f) / 2
+                else:
+                    dAngle = (f + circle) - i
+                    angle = ((i + f + circle) / 2) % circle
+                if dAngle < angleBuffer:
+                    return
+                splitter(i, angle)
+                angles.append(angle)
+                splitter(angle, f)
+            splitter(aI, aF)
+        else:
+            print 'error: bad/incorrect arguments were passed in! aborting'
+            return
+        xIUnit, yIUnit = math.cos(aI), math.sin(aI)
+        xFUnit, yFUnit = math.cos(aF), math.sin(aF)
         dS = ((center - self.nodeSize[1] - 1) / 4)
         for s in xrange(dS, (center - self.nodeSize[1]), dS):
             self.currentArea.append([(int(xIUnit * s) + center), int(yIUnit * s) + center])
-        xRim, yRim = int(center + (s * math.cos(degrees))), int(center + (s * math.sin(degrees)))
-        self.currentArea.append([xRim, yRim])
+        for angle in angles:
+            xRim, yRim = int(center + (s * math.cos(angle))), int(center + (s * math.sin(angle)))
+            self.currentArea.append([xRim, yRim])
         for s in xrange(s, 1, -dS):
             self.currentArea.append([(int(xFUnit * s) + center), (int(yFUnit * s) + center)])
         self.areaMode = 'manualUpdate'  # change mode to connect nodes
@@ -137,13 +164,14 @@ class colorSpaces():
         self.manualSelected = 0
         self.updateManualBoundary(center, center, False) # draw area with nodes in currentArea
         self.createAreaView()
-        self.createValidityMap()
+        if len(xyv) != 2:
+            self.createValidityMap()
 
     def circularFromMip(self, xyv):
         [x, y, v] = xyv
         self.intensitySlider.setValue(v)
         self.currentArea = [[x, y]]
-        self.updateColorSpaceView(redraw=False)
+        self.updateColorSpaceView(clear=True)
         self.createPoint(x, y)
         self.areaMode = 'circular'
         self.mouseHold = True
@@ -169,7 +197,7 @@ class colorSpaces():
             recur([ox, oy], [mx, my])  # before mid-point
             self.currentImage.setPixel(mx, my, self.boundaryColor)  # mid-point
             recur([mx, my], [nx, ny])  # past mid-point
-        self.updateColorSpaceView(False)  # make colorspace without drawings
+        self.updateColorSpaceView(clear=True)  # make colorspace without drawings
         [px, py] = self.currentArea[0]  # origin of circle
         recur([px, py], [x, y])  # draw line between origin and arg point x,y
         self.createPoint(px, py)  # bolden arg point x,y
@@ -183,7 +211,7 @@ class colorSpaces():
         :return: none: creates a circle in colorspace view around origin and
         radius data found in currentData, where circle is polygon of 10 nodes
         '''
-        self.updateColorSpaceView(False)  # make colorspace without drawings
+        self.updateColorSpaceView(clear=True)  # make colorspace without drawings
         origin = self.currentArea[0]
         radius = self.currentArea[-1]
         self.currentArea = []  # clear to contain actual nodes of polygon
@@ -273,7 +301,7 @@ class colorSpaces():
                         self.manualSelected = i
                         self.updateManualBoundary(ox, oy, False)
             return False
-        elif self.manualSelected != -1:  # a point has been selected already
+        if self.manualSelected != -1:  # a point has been selected already
             # this differs from previous 'recur' b/c it appends to newarea
             def recur(previous, next):
                 (ox, oy) = previous
@@ -286,7 +314,7 @@ class colorSpaces():
                 self.currentImage.setPixel(mx, my, self.boundaryColor)  # discovered mid-point
                 newarea.append([mx, my])
                 recur([mx, my], [nx, ny])  # past mid-point
-            self.updateColorSpaceView(False)  # remove drawings from view
+            self.updateColorSpaceView(clear=True)  # remove drawings from view
             self.currentArea[self.manualSelected] = [x, y]  # move to mouse
             # resave area and drawing information
             self.drawingAreas[self.indexArea] = ['manual']
@@ -316,7 +344,7 @@ class colorSpaces():
         newarea = np.array(newarea, dtype=np.float32)
         newarea /= self.side
         areaX, areaY = newarea[:, 0], newarea[:, 1]
-        self.areas[self.indexArea] = (areaX, areaY, copy.copy(self.csImageVal))
+        self.areas[self.indexArea] = [areaX, areaY, copy.copy(self.csImageVal)]
 
     def packCurrentArea2DrawingAreas(self):
         drawingArea = np.array(self.currentArea, dtype=np.float32)
@@ -379,19 +407,20 @@ class colorSpaces():
             error.setText(QtCore.QString('Error! Could not find intersection'
                     '...this needs to debugged. Please save the traceback.'))
             error.exec_()
-            self.updateColorSpaceView(False)
+            self.updateColorSpaceView(clear=True)
             self.currentArea = []
             return False
         newarea = newarea[newarea.index(self.intersection)::]  # crop out start
         # update view with drawn lines
-        self.updateColorSpaceView(False)
+        self.updateColorSpaceView(clear=True)
         for [x, y] in newarea:
             self.currentImage.setPixel(x, y, self.boundaryColor)
         self.drawColorSpaceView()
+        self.refreshAreaSpace()
         # add to self.areas and update dynamicview:
         self.boundaryToAreas(newarea)
 
-    def updateColorSpaceView(self, redraw=True, forced=False):
+    def updateColorSpaceView(self, redraw=False, clear=False):  # forced = forced validitymap
         '''
         :param redraw: bool: if the currentArea should be redrawn and/or pushed
         to the view
@@ -399,17 +428,28 @@ class colorSpaces():
         boundaryColor. optionally redraws area and pushes to view.
         '''
         # save new intensity into csImageVal
-        self.csImageVal = self.intensitySlider.sliderPosition()
+        csImageVal = self.intensitySlider.sliderPosition()
         self.intensityLabel.setText(  # refresh intensity label with new value
             QtCore.QString(('Intensity: %d' % self.csImageVal)))
-        if self.csImageVal > 125:  # if light, boundaryColor is black
+        if csImageVal > 200 and self.csImageVal <= 200:  # if light, boundaryColor is black
             self.boundaryColor = QtGui.qRgba(0, 0, 0, 255)
-        else:  # else if dark, boundaryColor is white
+            if type(redraw) is not bool:
+               redraw = False
+        elif csImageVal < 200 and self.csImageVal >= 200:  # else if dark, boundaryColor is white
             self.boundaryColor = QtGui.qRgba(255, 255, 255, 255)
-        # create transparent mask for drawing new areas on
-        self.currentImage.fill(QtGui.qRgba(0, 0, 0, 0))
-        if redraw:  # redraw drawing areas
-            if self.currentArea:
+            if type(redraw) is not bool:
+                redraw = False
+        self.csImageVal = csImageVal
+        if clear:
+            self.currentImage.fill(QtGui.qRgba(0, 0, 0, 0))
+        elif not (len(self.areas) == 1 or (len(self.areas) == 2 and not self.areas[1])):
+            redraw = True
+        if self.areas[self.indexArea]:
+            self.areas[self.indexArea][2] = copy.copy(self.csImageVal)
+        if type(redraw) is bool and not clear:  # redraw drawing areas
+            # create transparent mask for drawing new areas on
+            self.currentImage.fill(QtGui.qRgba(0, 0, 0, 0))
+            if self.areas[0]:
                 # change v value at current area in self.area history
                 if self.areaMode == 'auto':
                     self.finalizeBoundary()
@@ -418,9 +458,10 @@ class colorSpaces():
                     self.updateManualBoundary(x, y, False)
                 elif self.areaMode == 'manualCreate':
                     pass  # should be clearing self.currentArea and trashing old stuff######
-                if forced or not (len(self.areas) == 1 or (len(self.areas) == 2 and not self.areas[1])):
-                    self.createValidityMap()
-            self.drawColorSpaceView()
+            if redraw:
+                print 'creating new validity map'
+                self.createValidityMap()
+        self.drawColorSpaceView()
         self.createAreaView()
 
     def createColorSpaceView(self, draw=True):
@@ -498,8 +539,7 @@ class colorSpaces():
             self.indexArea = len(self.areas) - 1
             self.createAreaView()
             return
-        self.updateColorSpaceView(False)
-        self.drawColorSpaceView()
+        self.updateColorSpaceView(redraw=True)
         self.areas.append(False)
         self.drawingAreas.append(False)
         self.indexArea += 1
@@ -519,9 +559,7 @@ class colorSpaces():
         self.drawingAreas[-1] = False
         self.currentArea = []
         self.validityMap = False
-        self.updateColorSpaceView(False)
-        self.drawColorSpaceView()
-        self.createAreaView()
+        self.updateColorSpaceView(redraw=True)
         if len(self.areas) == 1 and not self.areas[0]:
             self.updateDynamic(self.validityMap)
         else:
@@ -539,63 +577,87 @@ class colorSpaces():
             for [x, y] in selection:
                 if px == x and py == y:
                     self.indexArea = i
-                    self.createAreaView()
-                    type = self.drawingAreas[self.indexArea][0]
-                    self.silentSliderSet(self.areas[self.indexArea][2])
-                    if type == 'manual':
-                        self.areaMode = 'manualUpdate'
-                        self.manualSelected = 0
-                    elif type == 'auto':
-                        self.areaMode = 'auto'
-                    self.rescaleCurrentArea()
+                    self.loadPreviousArea()
                     return
 
-    def volumeChange(self, text):
-        self.addArea()
+    def loadPreviousArea(self):
+        self.createAreaView()
+        type = self.drawingAreas[self.indexArea][0]
+        self.silentSliderSet(self.areas[self.indexArea][2])
+        if type == 'manual':
+            self.areaMode = 'manualUpdate'
+            self.manualSelected = 0
+        elif type == 'auto':
+            self.areaMode = 'auto'
+        self.rescaleCurrentArea()
+
+    def changeVolume(self, text):
         self.volumes[self.indexVolume] = [copy.deepcopy(self.areas),
         copy.deepcopy(self.areaViewPoints), copy.deepcopy(self.drawingAreas),
                                           copy.copy(self.indexArea)]
         self.indexVolume = self.volumeMenu.currentIndex()
+        self.cleanCurrentArea()
         if text == 'Add Color...':
-            self.volumes.append([])
-            self.volumeMenu.setItemText(self.indexVolume, QtCore.QString('%d' % (self.indexVolume + 1)))
-            self.volumeMenu.addItem(QtCore.QString('Add Color...'))
-            self.areas, self.areaViewPoints, self.drawingAreas = [False], [], [False]
-            self.currentArea, self.indexArea, self.manualSelected = [], 0, -1
+            self.addVolume()
         else:
             [self.areas, self.areaViewPoints, self.drawingAreas,
                         self.indexArea] = self.volumes[self.indexVolume]
-            if type(self.drawingAreas[self.indexArea]) is not bool:
-                self.currentArea = self.drawingAreas[self.indexArea][1]
+            self.refreshAreaSpace()
+            if self.drawingAreas[self.indexArea]:
+                self.loadPreviousArea()
+            else:
+                self.updateColorSpaceView(redraw=True)
+
+    def addVolume(self):
+        self.volumes.append([])
+        self.volumeMenu.setItemText(self.indexVolume, QtCore.QString('%d' % (self.indexVolume + 1)))
+        self.volumeMenu.addItem(QtCore.QString('Add Color...'))
+        self.areas, self.areaViewPoints, self.drawingAreas = [False], [], [False]
+        self.currentArea, self.indexArea, self.manualSelected = [], 0, -1
         self.refreshAreaSpace()
-        self.createValidityMap()
+        self.updateColorSpaceView(redraw=True)
+
+    def cleanCurrentArea(self):
+        self.currentArea = []
+        if self.areaMode == 'manualUpdate':
+            self.areaMode = 'manualCreate'
 
     def deleteVolume(self):
         if self.volumeMenu.currentText() == 'Add Color...':
             return
-        elif self.volumeMenu.currentIndex == 0:
-            del self.volumes[0]
-            return
         del self.volumes[self.indexVolume]
+        self.cleanCurrentArea()
         self.volumeMenu.removeItem(self.indexVolume)
         for i in xrange(self.indexVolume, (self.volumeMenu.count() - 1)):
             self.volumeMenu.setItemText(i, QtCore.QString('%d' % (i + 1)))
         if self.indexVolume != 0:
             self.indexVolume -= 1  # move for appearance + not stuck at end
         self.volumeMenu.setCurrentIndex(self.indexVolume)
-        [self.areas, self.areaViewPoints, self.drawingAreas, self.indexArea] = self.volumes[self.indexVolume]
-        if self.drawingAreas[self.indexArea]:
-            self.currentArea = self.drawingAreas[self.indexArea][1]
+        if len(self.volumes) == 0:
+            self.addVolume()
+        else:
+            [self.areas, self.areaViewPoints, self.drawingAreas, self.indexArea] = self.volumes[self.indexVolume]
         self.refreshAreaSpace()
-        self.createValidityMap()
+        if self.drawingAreas[self.indexArea]:
+            self.loadPreviousArea()
+        else:
+            self.updateColorSpaceView(redraw=True)
+
+    def rescaleCurrentArea(self):
+        if not self.drawingAreas[self.indexArea]:
+            return
+        self.currentArea = self.drawingAreas[self.indexArea][1]
+        self.currentArea *= self.side
+        self.currentArea = self.currentArea.astype(np.uint16)
+        self.currentArea = self.currentArea.tolist()
+        self.updateColorSpaceView(redraw=True)
 
     def refreshAreaSpace(self):
         self.manualSelected = 0
         self.indexArea = len(self.areas) - 1
         self.createAreaView()
         if self.areas[self.indexArea]:
-            self.intensitySlider.setValue = self.areas[2]
-        self.updateColorSpaceView()
+            self.silentSliderSet(self.areas[self.indexArea][2])
 
     def createAreaView(self):
         (width, height) = (self.areaView.width(), self.areaView.height())
@@ -639,6 +701,7 @@ class colorSpaces():
         return aX, aY
 
     def numpyAreas2Dict(self, area):
+        # sorting function for createValidityMap
         dict = {}
         minx = self.side
         maxx = 0
@@ -687,7 +750,8 @@ class colorSpaces():
                                           copy.copy(self.indexArea)]
         else:
             self.areas = self.volumes[self.indexVolume][0]
-        if self.gpuMode:
+        oneAreaMode = len(self.areas) == 1 or (len(self.areas) == 2 and not self.areas[1])
+        if self.gpuMode and oneAreaMode:
             self.validityMap = af.constant(0, 256, self.side, self.side, dtype=af.Dtype.u8)
         else:
             self.validityMap = np.zeros(shape=(256, self.side, self.side), dtype=np.uint8)
@@ -695,7 +759,7 @@ class colorSpaces():
             self.validityMap = False
             self.updateDynamic(self.validityMap)
             return
-        if len(self.areas) == 1 or (len(self.areas) == 2 and not self.areas[1]):
+        if oneAreaMode:
             dict = self.numpyAreas2Dict(self.areas[0])
             minx, maxx = dict['i'], dict['f']
             for x in xrange(minx, (maxx + 1)):
@@ -706,7 +770,7 @@ class colorSpaces():
                 self.validityMap[0:256, x, ymin:ymax] = 1
             if push:
                 b = time.time()
-                print 'time to create validityMap', 1000*(b-a)
+                print 'time to create simple validitymap', 1000*(b-a)
                 self.updateDynamic(self.validityMap)
             return
         # complex drawings:
@@ -753,6 +817,8 @@ class colorSpaces():
                     avgYmax = int(highYmax * fracV + lowYmax * ofracV) + 1
                     self.validityMap[v, avgX, avgYmin:avgYmax] = 1
             [lowI, lowV] = [highI, highV]
+        if self.gpuMode:
+            self.validityMap = af.interop.np_to_af_array(self.validityMap)
         b = time.time()
         if push:
             self.updateDynamic(self.validityMap)
@@ -805,20 +871,23 @@ class colorSpaces():
         return rgbMap
         # this will return an RGB validityMap
 
-    def rescaleCurrentArea(self):
-        if not self.drawingAreas[self.indexArea]:
-            return
-        self.currentArea = self.drawingAreas[self.indexArea][1]
-        self.currentArea *= self.side
-        self.currentArea = self.currentArea.astype(np.uint16)
-        self.currentArea = self.currentArea.tolist()
-        self.updateColorSpaceView(forced=True)
-
-    def rgbClusters2xyvNodes(self, mipImage, rgbList):
+    def rgbClusters2Chooser(self, mipImage, boundsInclude, rgbList):
         # this only works in 'hsv' mode right now
-        self.chooser = ColorChooser(mipImage, rgbList, parent=self)
+        self.chooser = ColorChooser(mipImage, boundsInclude, rgbList, parent=self)
         self.chooser.show()
-        # convert (h, s) coordinates to (x, y, 255) coordinates
+        self.chooser.exportButton.released.connect(self.chooser2xyvNodes)
+
+    def chooser2xyvNodes(self):
+        hSpans = self.chooser.getHSpans()
+        for i, hSpan in enumerate(hSpans):
+            if i == 0 and len(self.volumes) == 1 and type(self.areas[0]) is bool:
+                self.sectorFromMip(hSpan)
+                continue
+            self.volumeMenu.setCurrentIndex(len(self.volumes))
+            self.changeVolume('Add Color...')
+            self.sectorFromMip(hSpan)
+        self.createValidityMap()
+
 
 
 
