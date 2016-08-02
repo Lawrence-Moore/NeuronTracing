@@ -408,13 +408,13 @@ def display_image(image):
     plt.show()
 
 
-def k_means(image=None, images=None, weights=None, n_colors=64, non_background_sample_percent=.20, threshold=False):
-    neuron_pixels, non_neuron_pixels, image_array, image = sample_data(image, images)
+def k_means(image=None, images=None, weights=None, n_colors=64, num_training=1000, std_multiple=0, threshold=False, show_plot=False):
+    neuron_pixels, non_neuron_pixels, image_array, image = sample_data(image, images, std_multiple)
 
     if threshold:
-        image_array_sample = shuffle(neuron_pixels, random_state=0)[:int(non_background_sample_percent * neuron_pixels.shape[0])]
+        image_array_sample = shuffle(neuron_pixels, random_state=0)[:num_training]
     else:
-        image_array_sample = shuffle(image_array, random_state=0)[:int(non_background_sample_percent * image_array.shape[0])]
+        image_array_sample = shuffle(image_array, random_state=0)[:num_training]
 
     if weights is not None:
         # reshape weights appropiately. Assumes a list of lists is passed in
@@ -428,43 +428,43 @@ def k_means(image=None, images=None, weights=None, n_colors=64, non_background_s
     else:
         kmeans = KMeans(n_clusters=n_colors, random_state=0).fit(image_array_sample)
 
-    # add a cluster for the black
-    # kmeans.cluster_centers_ = np.append(kmeans.cluster_centers_, np.array([[0, 0, 0]]), axis=0)
-    print kmeans.cluster_centers_
+    if show_plot:
+        # Get labels for all points
+        labels = kmeans.predict(image_array)
 
-    # Get labels for all points
-    labels = kmeans.predict(image_array)
+        def recreate_image(codebook, labels, w, h):
+            """Recreate the (compressed) image from the code book & labels"""
+            d = codebook.shape[1]
+            image = np.zeros((w, h, d))
+            label_idx = 0
+            for i in range(w):
+                for j in range(h):
+                    image[i][j] = codebook[labels[label_idx]]
+                    label_idx += 1
+            return image
 
-    def recreate_image(codebook, labels, w, h):
-        """Recreate the (compressed) image from the code book & labels"""
-        d = codebook.shape[1]
-        image = np.zeros((w, h, d))
-        label_idx = 0
-        for i in range(w):
-            for j in range(h):
-                image[i][j] = codebook[labels[label_idx]]
-                label_idx += 1
-        return image
+        w, h, d = tuple(image.shape)
+        quantized_image = recreate_image(kmeans.cluster_centers_, labels, w, h)
 
-    w, h, d = tuple(image.shape)
-    quantized_image = recreate_image(kmeans.cluster_centers_, labels, w, h)
+        # display the image
+        fig = plt.figure()
+        ax = fig.add_subplot(1, 2, 1)
+        plt.imshow(image)
+        ax.set_title('Original')
+        ax = fig.add_subplot(1, 2, 2)
+        plt.imshow(quantized_image)
+        ax.set_title('After K-Means')
+        plt.show()
 
-    # display the image
-    fig = plt.figure()
-    ax = fig.add_subplot(1, 2, 1)
-    plt.imshow(image)
-    ax.set_title('Original')
-    ax = fig.add_subplot(1, 2, 2)
-    plt.imshow(quantized_image)
-    ax.set_title('After K-Means')
-    plt.show()
-
-    return quantized_image, kmeans.cluster_centers_
+    return kmeans.cluster_centers_
 
 
-def self_organizing_map(image=None, images=None, weights=None, n_colors=64, dim=None, sample_perc=.1, threshold=False):
-    std_multiple = 0  # if thresholding, what multiple of the standard deviation plus the mean should be used as the threshold value
-    neuron_pixels, non_neuron_pixels, pixels, image = sample_data(image, images, std_multiple=std_multiple)
+def self_organizing_map(image=None, images=None, weights=None, n_colors=64, dim=None,
+                        num_training=1000, std_multiple=0, threshold=False, show_plot=False):
+    """
+    Cluster an image using a self organizing map
+    """
+    neuron_pixels, non_neuron_pixels, pixels, image = sample_data(image, images, std_multiple)
 
     if dim is None and weights is not None:
         # figure out a way to spread out the nodes of the som
@@ -499,29 +499,26 @@ def self_organizing_map(image=None, images=None, weights=None, n_colors=64, dim=
 
     if threshold:
         # get mostly bright pixels with a bit of background
-        som.train_random(neuron_pixels, 10000)
+        som.train_random(neuron_pixels, num_training)
     else:
-        som.train_random(pixels, 10000)
+        som.train_random(pixels, num_training)
 
-    # append 0 for background pixels
-    # som.weights = np.reshape(np.append(som.weights, np.zeros((som.weights.shape[0], 3))),
-    #                         (som.weights.shape[0], som.weights.shape[1] + 1, 3))
+    if show_plot:
+        qnt = som.quantization(pixels)  # quantize each pixels of the image
+        clustered = np.zeros(image.shape)
+        for i, q in enumerate(qnt):
+            clustered[np.unravel_index(i, dims=(image.shape[0], image.shape[1]))] = q
 
-    qnt = som.quantization(pixels)  # quantize each pixels of the image
-    clustered = np.zeros(image.shape)
-    for i, q in enumerate(qnt):
-        clustered[np.unravel_index(i, dims=(image.shape[0], image.shape[1]))] = q
+        fig = plt.figure()
+        ax = fig.add_subplot(1, 2, 1)
+        plt.imshow(image)
+        ax.set_title('Original')
+        ax = fig.add_subplot(1, 2, 2)
+        plt.imshow(clustered)
+        ax.set_title('After SOM Clustering')
+        plt.show()
 
-    fig = plt.figure()
-    ax = fig.add_subplot(1, 2, 1)
-    plt.imshow(image)
-    ax.set_title('Original')
-    ax = fig.add_subplot(1, 2, 2)
-    plt.imshow(clustered)
-    ax.set_title('After SOM Clustering')
-    plt.show()
-
-    return clustered, np.reshape(som.weights, (som.weights.shape[0] * som.weights.shape[1], 3))
+    return np.reshape(som.weights, (som.weights.shape[0] * som.weights.shape[1], 3))
 
 
 def sample_data(image=None, images=None, std_multiple=0):
