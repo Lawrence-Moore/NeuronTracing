@@ -5,15 +5,10 @@ import scipy
 from matplotlib import pyplot as plt
 from skimage.feature import match_template
 from sklearn.cluster import KMeans
-from sklearn.metrics import pairwise_distances_argmin
 from sklearn.utils import shuffle
 from skimage.measure import structural_similarity as ssim
 from math import sqrt
 from minisom import MiniSom
-
-
-def normalize_with_min_max(images, threshold_min, threshold_max):
-    return normalize_colors(images, thresholded_min_max=True, threshold_min=threshold_min, threshold_max=threshold_max)
 
 
 def normalize_with_standard_deviation(images, std_multiple):
@@ -24,22 +19,21 @@ def normalize_generic(images):
     return normalize_colors(images)
 
 
-def normalize_colors(images, thresholded_min_max=False, threshold_std=False, threshold_min=0, threshold_max=0, std_multiple=0):
+def normalize_colors(images, threshold_std=False, std_multiple=0):
     """
     Normalize the colors by standarding the mean and standard deviation throughout each layer
     Takes in a list of 3D numpy arrays representing the images. Returns a list of the same format with the images normalized
     """
     # find the overal mean and standard deviation
-    if thresholded_min_max or threshold_std:
+    if threshold_std:
         # go through and threhold the images
         layer_means = []
         layer_stds = []
+        masks = []
         for image in images:
             # get the mask
-            if thresholded_min_max:
-                mask = threshold_with_min_max(image, threshold_min, threshold_max)
-            else:
-                mask = threshold_with_standard_deviation(image, std_multiple)
+            mask = threshold_with_standard_deviation(image, std_multiple)
+            masks.append(mask)
 
             # apply the mask to image and get the stats
             thresholded_image = image[mask]
@@ -54,45 +48,41 @@ def normalize_colors(images, thresholded_min_max=False, threshold_std=False, thr
 
     # go through the images and calculate the mean and standard deviation of each
     normalized_layers = []
-    for index, image in enumerate(images):
+    for image, mask in zip(images, masks):
         # iterate through the color layers
+        image = image.copy()
         layers = []
-        for layer_index in [0, 1, 2]:
-            layer = image[:, :, layer_index]
+        if threshold_std:
+            image[mask] = (((image[mask] - np.mean(image[mask])) / np.std(image[mask])) * std) + mean
+            normalized_layers.append(image)
+        else:
+            for layer_index in [0, 1, 2]:
+                layer = image[:, :, layer_index].copy()
 
-            if thresholded_min_max or threshold_std:
-                if thresholded_min_max:
-                    mask = threshold_with_min_max(layer, threshold_min, threshold_max)
-                else:
-                    mask = threshold_with_standard_deviation(layer, std_multiple)
-
-                layer[mask] = (((layer[mask] - np.mean(layer[mask])) / np.std(layer[mask])) * std) + mean
-                layers.append(layer)
-            else:
                 # first divide by mean and std_deviation, than scale by the overal mean and std from above
                 layer = (((layer - np.mean(layer)) / np.std(layer)) * std) + mean
                 layers.append(layer)
 
-        normalized_layers.append(layers)
+            normalized_layers.append(np.stack(layers, axis=2))
 
     # go through and cut any values less than 0 or greater than 2**16
     normalized_images = []
     for image in normalized_layers:
-        image = np.stack(image, axis=2)
         image[image < 0] = 0
         image[image >= 2**16] = 2**16 - 1
         normalized_images.append(image.astype(np.uint16))
     return normalized_images
 
 
-def threshold_with_standard_deviation(layer, std_multiple):
+def threshold_with_standard_deviation(image, std_multiple):
     '''
     Takes in a numpy array of an layer and returns a mask.
     The mask is true when the pixel values are within 3 standard deviations of the mean
     '''
-    mean = np.mean(layer)
-    std = np.std(layer)
-    return np.logical_and(mean < layer, layer < mean + std_multiple * std)
+    red_mask = np.logical_and(np.mean(image[:, :, 0]) < image[:, :, 0], image[:, :, 0] < np.mean(image[:, :, 0]) + std_multiple * np.std(image[:, :, 0]))
+    green_mask = np.logical_and(np.mean(image[:, :, 1]) < image[:, :, 1], image[:, :, 1] < np.mean(image[:, :, 1]) + std_multiple * np.std(image[:, :, 1]))
+    blue_mask = np.logical_and(np.mean(image[:, :, 2]) < image[:, :, 2], image[:, :, 2] < np.mean(image[:, :, 2]) + std_multiple * np.std(image[:, :, 2]))
+    return np.logical_or.reduce([red_mask, green_mask, blue_mask])
 
 
 def threshold_with_min_max(image, threshold_min, threshold_max):
@@ -128,11 +118,11 @@ def save_image(image, file_name):
     scipy.misc.toimage(image, cmin=0.0, cmax=2**16).save(file_name)
 
 
-def align_images(images, manual=False, template_top_left_x=0,
-                                       template_top_left_y=0,
-                                       template_width=0,
-                                       template_color_layer=0,
-                                       template_image_index=0):
+def align_images(images, wiggle_room=20, manual=False, template_top_left_x=0,
+                                         template_top_left_y=0,
+                                         template_width=0,
+                                         template_color_layer=0,
+                                         template_image_index=0):
     # align blue and green and then blue and red
     if manual is True:
         patch_indexes = (template_top_left_x, template_top_left_y)
@@ -142,8 +132,8 @@ def align_images(images, manual=False, template_top_left_x=0,
         color_indexes = [0, 1, 2]
         color_indexes.remove(template_color_layer)
 
-        aligned_images, offsets1 = adjust_color_layer(images, color_indexes[0], patch_indexes, patch, template_image_index, template_width)
-        aligned_images, offsets2 = adjust_color_layer(aligned_images, color_indexes[1], patch_indexes, patch, template_image_index, template_width)
+        aligned_images, offsets1 = adjust_color_layer(images, color_indexes[0], patch_indexes, patch, template_image_index, template_width, wiggle_room=wiggle_room)
+        aligned_images, offsets2 = adjust_color_layer(aligned_images, color_indexes[1], patch_indexes, patch, template_image_index, template_width, wiggle_room=wiggle_room)
         if template_image_index >= len(aligned_images):
             template_image_index = len(aligned_images) - 1
         visualize_alignment(images, aligned_images, patch_indexes, template_image_index, template_width, color_indexes, offsets1, offsets2)
@@ -169,14 +159,14 @@ def align_images(images, manual=False, template_top_left_x=0,
         return aligned_images
 
 
-def adjust_color_layer(images, color_index, patch_indexes, patch, image_index, width):
+def adjust_color_layer(images, color_index, patch_indexes, patch, image_index, width, wiggle_room=20):
     '''
     Adjust the color layers so they align as closely as possible
     I'll use blue as the baseline truth for alignment
     '''
 
     # find that patch in blue and compare coordinates
-    offsets, best_patch = match_patch(images, patch_indexes, patch, width, image_index, color_index)
+    offsets, best_patch = match_patch(images, patch_indexes, patch, width, image_index, color_index, wiggle_room=wiggle_room)
     # print "one way", offsets
     # offsets, best_patch = alternative_patch_matching(images, patch_indexes, patch, width, image_index, color_index)
     # print "another", offsets
@@ -404,13 +394,13 @@ def evaluate_normalization_with_mask(old_images, adjusted_images, mask):
     plt.show()
 
 
-def visualize_mask(image, mask, name):
+def visualize_mask(image, mask):
     '''
     Given a 2D numpy array (image) and a mask with the same size, save the masked image to the file name
     '''
     img = image.copy()
     img[np.logical_not(mask)] = 0
-    scipy.misc.imsave(name + '.jpg', img)
+    display_image(img)
 
 
 def display_image(image):

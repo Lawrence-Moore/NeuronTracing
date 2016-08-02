@@ -41,9 +41,10 @@ def generate_data(color_pixels, color_status, image):
     radius = 15  # number of pixels
     for color, status in zip(color_pixels, color_status):
         color_features = []
-        color_features.append(get_percentage_of_pixels_within_color_radius_feature(image, color, radius))
-        color_features.append(get_length_of_lines_feature(image, color, radius))
-        color_features.append(measure_increase_in_connectivity_with_radius_feature(image, color, radius))
+        masked_image = generate_image_based_on_values(image, color, radius)
+        color_features.append(get_percentage_of_pixels_within_color_radius_feature(masked_image, color, radius))
+        color_features.append(get_length_of_lines_feature(masked_image, color, radius))
+        color_features.append(measure_increase_in_connectivity_with_radius_feature(masked_image, color, radius))
 
         datum = [color_features, status]
         data.append(datum)
@@ -53,7 +54,7 @@ def generate_data(color_pixels, color_status, image):
     return data
 
 
-def generate_image_based_on_values(color, image, radius):
+def generate_image_based_on_values(image, color, radius):
     red_mask = np.logical_and(image[:, :, 0] > color[0] - radius, image[:, :, 0] < color[0] + radius)
     green_mask = np.logical_and(image[:, :, 1] > color[1] - radius, image[:, :, 1] < color[1] + radius)
     blue_mask = np.logical_and(image[:, :, 2] > color[2] - radius, image[:, :, 2] < color[2] + radius)
@@ -81,17 +82,24 @@ def measure_increase_in_connectivity_with_radius_feature(image, color, starting_
 
 
 def get_length_of_lines_feature(image, color, radius):
+    # use a probablistic hough line algorithm to calculate the average length of the lines detected
     edges = canny(image)
     lines = probabilistic_hough_line(edges, threshold=10, line_length=10, line_gap=3)
     return calculate_length_of_lines(lines)
 
 
 def calculate_length_of_lines(lines):
+    '''
+    Given a list of a startpoints and endpoints for the lines, calculate the average length of the lines
+    '''
     if len(lines) == 0:
         return 0
     else:
         line_length_sum = 0
+        # iterate through each line
         for line in lines:
             p0, p1 = line
+            # sum up the line length
             line_length_sum += sqrt((p0[0] - p1[0])**2 + (p0[1] - p1[1])**2)
+        # average over the length of the line
         return float(line_length_sum) / len(lines)
