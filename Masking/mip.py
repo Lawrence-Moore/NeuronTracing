@@ -65,7 +65,10 @@ class mips():
         px, py = int(fracMx * width + xi), int(fracMy * height + yi)
         # get array of this square around it in 5x5 pixel fashion
         r = 5
-        cropped = self.mappedNumpyMip[(py - r):(py + r), (px - r):(px + r)]
+        if self.colorMode == 'rgb':
+            cropped = self.originalImage[(py - r):(py + r), (px - r):(px + r)]
+        else:
+            cropped = self.mappedNumpyMip[(py - r):(py + r), (px - r):(px + r)]
         x, y, v = cropped[:, :, 0], cropped[:, :, 1], cropped[:, :, 2]
         cx, cy, cv = np.median(x).astype(int), np.median(y).astype(int), np.median(v).astype(int)
         dxy = self.colorSpace.width() / 20
@@ -73,7 +76,9 @@ class mips():
         y[abs(y - cy) > dxy] = cy
         v[v < 100] = cv
         avgX, avgY, avgV = np.median(x).astype(int), np.median(y).astype(int), np.max(v).astype(int)
-        ########
+        if self.colorMode == 'rgb':
+            avgX = int(avgX * (self.colorSpace.width() / 256.))
+            avgY = int(avgY * (self.colorSpace.height() / 256.))
         if type(self.selectionMask) is bool or resetMask:
             self.selectionMask = QtGui.QImage(viewWidth, viewHeight, QtGui.QImage.Format_ARGB32)  # this assumes fullView and dynamicView are congruent
             self.selectionMask.fill(QtGui.qRgba(0, 0, 0, 0))
@@ -200,7 +205,10 @@ class mips():
             self.validityMap = map
         a = time.time()
         if self.gpuMode:
-            cropped = saving_and_color.fullGPUMask(self.originalImage,
+            if self.colorMode == 'rgb':
+                cropped = saving_and_color.fullGPUMask(self.originalImage, 256, self.validityMap, self.originalImage)
+            else:
+                cropped = saving_and_color.fullGPUMask(self.originalImage,
                 self.colorSpace.width(), self.validityMap, self.mappedNumpyMip)
             if retrn:
                 return cropped
@@ -358,7 +366,6 @@ class mips():
         pic = QtGui.QPixmap.fromImage(img)
         scene.addItem(QtGui.QGraphicsPixmapItem(pic))  # add image to scene
         if type(self.selectionMask) is not bool and not self.fullNeuronLocatingView:
-            print 'i got added!'
             img = self.selectionMask.copy()  # b/c selectionMask is destroyed after use
             pixmap = QtGui.QPixmap.fromImage(img)
             scene.addItem(QtGui.QGraphicsPixmapItem(pixmap))
@@ -370,6 +377,8 @@ class mips():
 
     def saveImage(self):
         # warning: this saves an 8-bit image!
+        if not self.filename:
+            return
         dialog = QtGui.QFileDialog()
         filename = str(dialog.getSaveFileName(filter=QtCore.QString('Images (*.tif)')))
         if not filename:  # no filename was created

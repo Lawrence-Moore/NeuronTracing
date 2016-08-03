@@ -7,7 +7,7 @@ import time
 import arrayfire as af
 import numpy as np
 from PIL import Image
-from saving_and_color import rgb2xyv, xyvLst2rgb
+from saving_and_color import rgb2xyv, xyvLst2rgb, getStack
 import copy
 
 sys.path.append("../Correction")
@@ -76,6 +76,7 @@ class Run(QtGui.QMainWindow):
         self.ui.maps2ClusteringButton.released.connect(self.maps2ClusteringStart)
         self.ui.neuronsDoneButton.setVisible(False)
         self.ui.neuronsDoneButton.released.connect(self.maps2ClusteringFinish)
+        self.ui.getMapsButton.released.connect(self.getMaps)
 
     def resizeEvent(self, event):
         width, height = event.size().width(), event.size().height()
@@ -96,6 +97,10 @@ class Run(QtGui.QMainWindow):
             self.colorSpace.updateColorSpaceView()
             self.colorSpace.createValidityMap()
 
+    def getMaps(self):
+        print 'hi!'
+        maps = self.colorSpace.saveStack(saving=False)
+
     def maps2ClusteringStart(self):
         if not self.mipViews.filename:
             return
@@ -103,26 +108,19 @@ class Run(QtGui.QMainWindow):
         dialog.setText(QtCore.QString('Choose Neurons/Colors from either MIP View'
             '. When you are finished, press done.'))
         dialog.show()
+        self.mipViews.selectedNeurons = []
         self.ui.neuronsDoneButton.setVisible(True)
         self.mipViews.neuronLocating = True
         self.mipViews.updateMipView()
 
     def maps2ClusteringFinish(self):
-        if not self.mipViews.filename:
-            return
-        self.mipViews.neuronLocating = False
-        self.ui.neuronsDoneButton.setVisible(False)
 
         # neurons list is xyv
         neuronsList = copy.copy(self.mipViews.selectedNeurons)
         colormode = self.colorMode
 
         radius = self.colorSpace.side / 2
-        # maps = self.colorSpace.saveStack(saving=False)
 
-        # convert the image into the xyv space
-        # img = rgb2xyv(self.mipViews.originalImage, radius, "hsv")
-        img = self.mipViews.originalImage
 
         # k_means(self.mipViews.originalImage, neuronsList, n_colors=len(neuronsList))
         neuronsList = xyvLst2rgb(neuronsList, radius, colormode)
@@ -131,18 +129,45 @@ class Run(QtGui.QMainWindow):
 
         # make sure it's on the 0 - 1 scale
         weights = weights.astype(float) / np.max(weights)
-        k_clustered_img, k_centers = k_means(image=img, n_colors=len(weights), threshold=True)
+        twoDMode = False
+        if twoDMode:
+            img = self.mipViews.originalImage.copy()
+            k_centers = k_means(image=img, n_colors=len(weights), threshold=True)
+            dir = False
+        else:
+            # initialize progress bar
+            bar = QtGui.QProgressBar()
+            bar.setWindowTitle(QtCore.QString('Reading stack...'))
+            bar.setWindowModality(QtCore.Qt.WindowModal)
+            size = radius * 3
+            bar.resize((size * 2), size / 20)
+            bar.move(size, size)
+            bar.setMaximum(3)
+            bar.show()
+            img, dir = getStack(full16Bit=False, withDir=True)
+            bar.setValue(1)
+            bar.setWindowTitle(QtCore.QString('Clustering stack with k-means...'))
+            QtGui.QApplication.processEvents()
+            if not img:  # user cancelled by not choosing open directory
+                return
+            k_centers = k_means(images=img, n_colors=len(weights), threshold=True)
+            bar.setValue(2)
+            bar.setWindowTitle(QtCore.QString('Masking stack with clusters...'))
+            QtGui.QApplication.processEvents()
         # som_clustered_img, som_centers = self_organizing_map(image=img, weights=weights, n_colors=len(weights), threshold=True)
         k_centers *= 256
         rgbList = k_centers.astype(np.uint8)
         rgbList = rgbList.tolist()
         # self.colorSpace.rgbClusters2Chooser(self.mipViews.originalImage.copy(), (rgbList + neuronsList))
-        self.colorSpace.rgbClusters2Chooser(self.mipViews.originalImage.copy(), self.mipViews.boundsInclude, rgbList)
-
+        self.colorSpace.rgbClusters2Chooser(img, self.mipViews.boundsInclude, rgbList, twoDMode, dir)
+        if not twoDMode:
+            bar.close()
         # copy.copy(self.mipViews.boundsInclude) -> this is for image correction
 
         # do stuff with variables above
         # clean up:
+        self.mipViews.neuronLocating = False
+        self.ui.neuronsDoneButton.setVisible(False)
         self.mipViews.selectedNeurons = []
         self.mipViews.updateMipView()
 
@@ -174,8 +199,11 @@ class Run(QtGui.QMainWindow):
             fside, dside = maximumFullSize, (2 * side - maximumFullSize)
         self.ui.mipFull.move(x, y)
         self.ui.mipFull.resize(fside, fside)
-        self.ui.mipDynamic.move(x, fside + 30)
-        ax, ay = x + dside + 10, fside + 30 + dside - self.ui.maps2ClusteringButton.height()
+        ay = fside + 30
+        self.ui.mipDynamic.move(x, ay)
+        ax = x + dside + 10
+        self.ui.getMapsButton.move(ax, ay)
+        ay += dside - self.ui.maps2ClusteringButton.height()
         self.ui.maps2ClusteringButton.move(ax, ay)
         self.ui.neuronsDoneButton.move(ax, ay - self.ui.neuronsDoneButton.height() - 5)
         self.ui.mipDynamic.resize(dside, dside)
@@ -342,7 +370,6 @@ class Run(QtGui.QMainWindow):
                 fullView = False
             else:
                 fullView = True
-            print fullView
             pos = event.pos()
             if self.mipViews.neuronLocating:
                 self.mipViews.getNeuronLocation(pos.x(), pos.y(), fullView, True)
@@ -452,6 +479,8 @@ if __name__ == '__main__':
 # when merging/deleting colors with gui tool, implement quick view into
 # displaying image (offload viewing function from clustering module)
 # for zoom/pan, scroll into/out of the mouse position
+
+# preferences: clustering option to do on 3D or 2D image
 
 # time-performance log:
 # 6/24: 2D Simple with 200^2 pixels: (MappedMip: 470ms), (Updating: 35ms)

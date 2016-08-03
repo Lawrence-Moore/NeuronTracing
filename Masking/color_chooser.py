@@ -12,10 +12,14 @@ import minisom
 from image_normalization import k_means, self_organizing_map, display_image
 
 class ColorChooser(QtGui.QMainWindow):  # initiated in colorspace
-    def __init__(self, mipImage, boundsInclude, rgbList, parent=None):
+    def __init__(self, mipImage, boundsInclude, rgbList, gpuMode, twoDMode, dir, parent=None):
         QtGui.QMainWindow.__init__(self)
+        self.setStyleSheet('QMainWindow {background-color: gray;}')
         self.doneInitializing = False
-        self.mipImage = mipImage
+        self.openDirectory = dir
+        self.shadeSelected = False  # can be changed in preferences
+        self.gpuMode = gpuMode  # gpuMode
+        self.mipImage = np.array(mipImage)  # in case 3D, assembles input as a single numpy array
         self.width, self.height = 800, 400
         self.setGeometry(QtCore.QRect(200, 200, self.width, self.height))
         self.boundsInclude = boundsInclude
@@ -23,6 +27,8 @@ class ColorChooser(QtGui.QMainWindow):  # initiated in colorspace
         self.modifiedRgbList = copy.copy(self.rgbList)
         self.viewSize = 100
         self.dimRatio = 0.5
+        # event from bg
+        self.installEventFilter(self)
         # buttons. reset
         self.resetButton = QtGui.QPushButton(self)
         self.resetButton.setText('Reset')
@@ -56,7 +62,22 @@ class ColorChooser(QtGui.QMainWindow):  # initiated in colorspace
         # view
         self.reset()
         self.merges = []  # [merged color, [origins of merge]]
+        if twoDMode:
+            self.numDims = 2
+        else:
+            self.numDims = 3
+            if self.gpuMode:
+                self.create3DMasksGPU()
+            else:
+                self.create3DMasks()
         self.doneInitializing = True
+
+    def eventFilter(self, source, event):
+        if event.type() == QtCore.QEvent.MouseButtonRelease and source in self.colorViewPorts:
+            self.newSelection(self.colorViewPorts.index(source))
+        elif event.type() == QtCore.QEvent.MouseButtonRelease:
+            self.clearSelection()
+        return False
 
     def resizeEvent(self, event):
         if not self.doneInitializing:
@@ -70,24 +91,52 @@ class ColorChooser(QtGui.QMainWindow):  # initiated in colorspace
         self.viewSize = self.height / 4
         self.reset()
 
+    def clearSelection(self):
+        while True in self.selectedViews:
+            i = self.selectedViews.index(True)
+            if self.shadeSelected:
+                self.color2View(self.modifiedRgbList[i], self.colorViews[i])
+            self.colorViews[i].setStyleSheet('.QGraphicsView {border: 1px solid gray;}')
+            self.selectedViews[i] = False
+
     def apply2Stack(self):
-        dialog = QtGui.QFileDialog()
-        opendirectory = str(dialog.getExistingDirectory())
-        if opendirectory == '':
-            return
-        saving_and_color.applyToStack([self.merges, self.modifiedRgbList, self.rgbList], self.width, opendirectory,
-                                      self.boundsInclude, 'rgbClusters', False)
+        if self.numDims == 3:
+            colors = []
+            for rgb in self.modifiedRgbList:
+                colors.append(self.displaySingle3DImage(rgb, rtrn=True))
+            saving_and_color.applyToStack(colors, (self.width / 2), self.openDirectory, self.boundsInclude,
+                                          'rgbClusters3D', self.gpuMode)
+        else:
+            dialog = QtGui.QFileDialog()
+            opendirectory = str(dialog.getExistingDirectory())
+            if opendirectory == '':
+                return
+            saving_and_color.applyToStack([self.merges, self.modifiedRgbList, self.rgbList], (self.width / 2),
+                                          opendirectory, self.boundsInclude, 'rgbClusters', self.gpuMode)
 
     def split(self):
         i = self.selectedViews.index(True)
-        img = self.displaySingleRGBImage(self.modifiedRgbList[i], rtrn=True)
-        k_clustered_img, k_centers = k_means(image=img, n_colors=2, threshold=True)
+        if self.numDims == 2:
+            img = self.displaySingleRGBImage(self.modifiedRgbList[i], rtrn=True)
+            k_clustered_img, k_centers = k_means(image=img, n_colors=2, threshold=True)
+        else:
+            # initialize progress bar
+            bar = QtGui.QProgressBar()
+            bar.setWindowTitle(QtCore.QString('Creating stack...'))
+            bar.setWindowModality(QtCore.Qt.WindowModal)
+            bar.resize((self.width * 2), self.width / 20)
+            bar.move(self.width, self.width)
+            bar.setMaximum(3)
+            bar.show()
+            img = self.displaySingle3DImage(self.modifiedRgbList[i], rtrn=True)
+            bar.setValue(1)
+            bar.setWindowTitle(QtCore.QString('Clustering stack with k-means...'))
+            QtGui.QApplication.processEvents()
+            k_clustered_img, k_centers = k_means(images=img, n_colors=2, threshold=True)
         self.selectedViews[i] = False
         k_centers *= 256
-        print 'shape of k_centers:', k_centers.shape
         rgbList = k_centers.astype(np.uint8)
         rgbList = rgbList.tolist()
-        print 'number of colors after split:', len(rgbList)
         assert len(rgbList) == 2
         ii = self.rgbList.index(self.modifiedRgbList[i])
         self.rgbList[ii] = rgbList[0]
@@ -95,14 +144,33 @@ class ColorChooser(QtGui.QMainWindow):  # initiated in colorspace
         self.modifiedRgbList[i] = rgbList[0]
         self.modifiedRgbList.insert(i, rgbList[1])
         self.reset()
+        if self.numDims == 3:
+            bar.setValue(2)
+            bar.setWindowTitle(QtCore.QString('Assigning pixels in stack to clusters...'))
+            QtGui.QApplication.processEvents()
+            if self.gpuMode:
+                self.create3DMasksGPU()
+            else:
+                self.create3DMasks()
 
     def viewMip(self):
         if True not in self.selectedViews:
-            self.displayRGBImage()
+            if self.numDims == 3:
+                self.display3DImage()
+            elif self.gpuMode:
+                self.displayRGBImageGPU()
+            else:
+                self.displayRGBImage()
             return
         while True in self.selectedViews:
             i = self.selectedViews.index(True)
-            self.displaySingleRGBImage(self.modifiedRgbList[i])
+            if self.numDims == 3:
+                self.displaySingle3DImage(self.modifiedRgbList[i])
+            elif self.gpuMode:
+                self.displaySingleRGBImageGPU(self.modifiedRgbList[i])
+            else:
+                self.displaySingleRGBImage(self.modifiedRgbList[i])
+            self.colorViews[i].setStyleSheet('.QGraphicsView {border: 1px solid gray;}')
             self.color2View(self.modifiedRgbList[i], self.colorViews[i])
             self.selectedViews[i] = False
 
@@ -160,16 +228,12 @@ class ColorChooser(QtGui.QMainWindow):  # initiated in colorspace
             colorView.move(x, y)
             colorView.viewport().installEventFilter(self)
             colorView.viewport().setMouseTracking(True)
+            colorView.setStyleSheet('.QGraphicsView {border: 1px solid gray;}')
             colorView.show()
             self.color2View((r, g, b), colorView)
             self.colorViews.append(colorView)
             self.colorViewPorts.append(colorView.viewport())
             x += self.viewSize * 1.2
-
-    def eventFilter(self, source, event):
-        if event.type() == QtCore.QEvent.MouseButtonRelease and source in self.colorViewPorts:
-            self.newSelection(self.colorViewPorts.index(source))
-        return False
 
     def color2View(self, color, view):
         r, g, b = color
@@ -183,16 +247,326 @@ class ColorChooser(QtGui.QMainWindow):  # initiated in colorspace
         [r, g, b] = self.modifiedRgbList[index]
         if self.selectedViews[index]:
             self.selectedViews[index] = False
-            self.colorViews[index].setFrameStyle(QtGui.QFrame.Plain)
+            self.colorViews[index].setStyleSheet('.QGraphicsView {border: 1px solid gray;}')
         else:
             self.selectedViews[index] = True
+            self.colorViews[index].setStyleSheet('.QGraphicsView {border: 3px solid white;}')
             r, g, b = int(r * self.dimRatio), int(g * self.dimRatio), int(b * self.dimRatio)
-        self.color2View((r, g, b), self.colorViews[index])
+        if self.shadeSelected:
+            self.color2View((r, g, b), self.colorViews[index])
+
+    def displayRGBImage(self):
+        a = time.time()
+        rmasked, gmasked, bmasked = np.split(self.mipImage.copy(), 3, axis=self.numDims)
+        mipFloat = self.mipImage.astype(np.float32)
+        raxis, gaxis, baxis = np.split(mipFloat, 3, axis=self.numDims)
+        for i, [r, g, b] in enumerate(self.rgbList):
+            mask = True
+            dist = ((raxis - r) ** 2 + (gaxis - g) ** 2 + (baxis - b) ** 2)
+            for ii, [ar, ag, ab] in enumerate(self.rgbList):
+                if ii == i:  # don't compare with one's self
+                    continue
+                adist = ((raxis - ar) ** 2 + (gaxis - ag) ** 2 + (baxis - ab) ** 2)
+                mask *= dist <= adist
+            [r, g, b] = self.original2Merged([r, g, b])
+            if [r, g, b] not in self.modifiedRgbList:
+                [r, g, b] = [0, 0, 0]
+            rmasked[mask] = r
+            gmasked[mask] = g
+            bmasked[mask] = b
+        maskedImage = np.dstack((rmasked, gmasked, bmasked))
+        b = time.time()
+        print 'full display time with cpu', 1000*(b-a)
+        img = Image.fromarray(maskedImage)
+        img.show()
+
+    def displayRGBImageGPU(self):
+        a = time.time()
+        width, height, _ = self.mipImage.shape
+        mipArr = self.mipImage.reshape(height*width, 3)
+        mipArr = af.interop.np_to_af_array(mipArr)
+        channels = mipArr.copy()
+        rmasked, gmasked, bmasked = channels[:, 0], channels[:, 1], channels[:, 2]
+        for [r, g, b] in self.rgbList:
+            mask = af.constant(0, height*width, dtype=af.Dtype.b8)
+            for ii in af.ParallelRange(height * width):
+                pr, pg, pb = mipArr[ii, 0], mipArr[ii, 1], mipArr[ii, 2]
+                dist = (r - pr) ** 2 + (g - pg) ** 2 + (b - pb) ** 2
+                isCloser = 1
+                for [ar, ag, ab] in self.rgbList:
+                    adist = (ar - pr) ** 2 + (ag - pg) ** 2 + (ab - pb) ** 2
+                    isCloser *= (dist <= adist)
+                mask[ii] = isCloser
+            if [r, g, b] not in self.modifiedRgbList:
+                [r, g, b] = [0, 0, 0]
+            else:
+                [r, g, b] = self.original2Merged([r, g, b])
+            rmasked[mask], gmasked[mask], bmasked[mask] = r, g, b
+        rmasked, gmasked, bmasked = rmasked.__array__(), gmasked.__array__(), bmasked.__array__()
+        maskedImage = np.dstack((rmasked, gmasked, bmasked))
+        maskedImage = maskedImage.reshape(height, width, 3)
+        b = time.time()
+        print 'full display time gpu', 1000*(b-a)
+        img = Image.fromarray(maskedImage)
+        img.show()
+
+    def displaySingleRGBImageGPU(self, rgb, forceColor=False, rtrn=False):
+        a = time.time()
+        width, height, _ = self.mipImage.shape
+        mipArr = self.mipImage.reshape(height*width, 3)
+        mipArr = af.interop.np_to_af_array(mipArr)
+        channels = mipArr.copy()
+        rmasked, gmasked, bmasked = channels[:, 0], channels[:, 1], channels[:, 2]
+        stack = self.merged2Originals(rgb)
+        fullMask = af.constant(0, height*width, dtype=af.Dtype.b8)
+        for [r, g, b] in stack:
+            mask = af.constant(0, height*width, dtype=af.Dtype.b8)
+            for ii in af.ParallelRange(height * width):
+                pr, pg, pb = mipArr[ii, 0], mipArr[ii, 1], mipArr[ii, 2]
+                dist = (r - pr) ** 2 + (g - pg) ** 2 + (b - pb) ** 2
+                isCloser = 1
+                for [ar, ag, ab] in self.rgbList:
+                    adist = (ar - pr) ** 2 + (ag - pg) ** 2 + (ab - pb) ** 2
+                    isCloser *= (dist <= adist)
+                mask[ii] = isCloser
+            fullMask |= mask
+        if not forceColor:
+            rgb = [0, 0, 0]
+            fullMask = ~fullMask
+        rmasked[fullMask], gmasked[fullMask], bmasked[fullMask] = rgb
+        rmasked, gmasked, bmasked = rmasked.__array__(), gmasked.__array__(), bmasked.__array__()
+        maskedImage = np.dstack((rmasked, gmasked, bmasked))
+        maskedImage = maskedImage.reshape(height, width, 3)
+        b = time.time()
+        print 'single display time gpu', 1000*(b-a)
+        if rtrn:
+            return maskedImage
+        img = Image.fromarray(maskedImage)
+        img.show()
+
+    def displaySingleRGBImage(self, rgb, forceColor=False, rtrn=False):
+        a = time.time()
+        if forceColor:
+            plane = np.zeros((self.mipImage.shape[0], self.mipImage.shape[1], 1), dtype=np.uint8)
+            rmasked = plane.copy()
+            gmasked = plane.copy()
+            bmasked = plane
+        else:
+            maskedImage = self.mipImage.copy()
+        mipFloat = self.mipImage.astype(np.float32)
+        raxis, gaxis, baxis = np.split(mipFloat, 3, axis=2)
+        stack = self.merged2Originals(rgb)
+        fullMask = False
+        for [r, g, b] in stack:
+            mask = True
+            dist = ((raxis - r) ** 2 + (gaxis - g) ** 2 + (baxis - b) ** 2)
+            for [ar, ag, ab] in self.rgbList:
+                if [ar, ag, ab] == [r, g, b]:  # don't compare with one's self
+                    continue
+                adist = ((raxis - ar) ** 2 + (gaxis - ag) ** 2 + (baxis - ab) ** 2)
+                mask *= dist <= adist
+            fullMask += mask
+        if forceColor:
+            rmasked[fullMask], gmasked[fullMask], bmasked[fullMask] = rgb  # color takes over its neighbors
+            maskedImage = np.dstack((rmasked, gmasked, bmasked))
+        else:
+            fullMask = np.repeat(fullMask, 3, axis=2)
+            maskedImage[~fullMask] = 0
+        b = time.time()
+        if rtrn:
+            return maskedImage
+        print 'single display time cpu', 1000*(b-a)
+        img = Image.fromarray(maskedImage)
+        img.show()
+
+    def original2Merged(self, rgb):
+        def search(color):  # a recursive search
+            for [mc, mcs] in self.merges:
+                if color in mcs:
+                    color = search(mc)
+                    break
+            return color
+        return search(rgb)
+
+    def merged2Originals(self, rgb):
+        if type(rgb[0]) is list:
+            stack = rgb
+        else:
+            stack = [rgb]
+        def search(stack):  # a recursive search
+            newstack = []
+            for rgb in stack:
+                if rgb not in self.rgbList:
+                    found = False
+                    for [mc, mcs] in self.merges:
+                        if mc == rgb:
+                            found = True
+                            break
+                    if found:
+                        newstack += search(mcs)
+                    else:
+                        print 'Error! Recursive search could not find where merged', rgb,
+                        print 'originated from. Aborting...'
+                        return
+                else:
+                    newstack += [rgb]
+            return newstack
+        return search(stack)
+
+    def displaySingle3DImage(self, rgb, forced=False, rtrn=False):
+        a = time.time()
+        stack = self.merged2Originals(rgb)
+        rmasked, gmasked, bmasked = self.imgChannels[0].copy(), self.imgChannels[1].copy(), self.imgChannels[2].copy()
+        fullMask = False
+        for color in stack:
+            i = self.rgbList.index(color)
+            fullMask += self.threeDMasks[i]
+        if not forced:
+            fullMask = ~fullMask
+            rgb = [0, 0, 0]
+        rmasked[fullMask], gmasked[fullMask], bmasked[fullMask] = rgb
+        if self.gpuMode:
+            rmasked, gmasked, bmasked = rmasked.__array__(), gmasked.__array__(), bmasked.__array__()
+            maskedImage = np.dstack((rmasked, gmasked, bmasked))
+        else:
+            maskedImage = np.concatenate((rmasked, gmasked, bmasked), axis=3)
+        if self.gpuMode:
+            maskedImage = maskedImage.reshape(self.mipImage.shape[0], self.mipImage.shape[1], self.mipImage.shape[2], 3)
+        layers = np.split(maskedImage, self.mipImage.shape[0], axis=0)
+        if rtrn:
+            layers = map(lambda lst: lst[0], layers)  # the first axis has length 1
+            return layers
+        b = time.time()
+        print 'time to display single 3D Image', 1000*(b-a)
+        # create mip for maskedImage
+        mip = reduce(np.maximum, layers)
+        mip = mip[0]
+        img = Image.fromarray(mip)
+        img.show()
+
+    def display3DImage(self, rtrn=False):
+        # maximum memory capacity observed is: (1200mb is good, 1520mb is bad)
+        a = time.time()
+        rmasked, gmasked, bmasked = self.imgChannels[0].copy(), self.imgChannels[1].copy(), self.imgChannels[2].copy()
+        for rgb in self.modifiedRgbList:
+            stack = self.merged2Originals(rgb)
+            fullMask = False
+            for color in stack:
+                i = self.rgbList.index(color)
+                fullMask += self.threeDMasks[i]
+            #rmasked[fullMask] = rgb[0]
+            #gmasked[fullMask] = rgb[1]
+            #bmasked[fullMask] = rgb[2]
+            rmasked[fullMask], gmasked[fullMask], bmasked[fullMask] = rgb
+        if self.gpuMode:
+            rmasked, gmasked, bmasked = rmasked.__array__(), gmasked.__array__(), bmasked.__array__()
+            maskedImage = np.dstack((rmasked, gmasked, bmasked))
+        else:
+            maskedImage = np.concatenate((rmasked, gmasked, bmasked), axis=3)
+        if self.gpuMode:
+            maskedImage = maskedImage.reshape(self.mipImage.shape[0], self.mipImage.shape[1], self.mipImage.shape[2], 3)
+        if rtrn:
+            return maskedImage
+        # create mip for maskedImage
+        layers = np.split(maskedImage, self.mipImage.shape[0], axis=0)
+        mip = reduce(np.maximum, layers)
+        mip = mip[0]
+        b = time.time()
+        print 'time to display 3D Image', 1000*(b-a)
+        img = Image.fromarray(mip)
+        img.show()
+
+    def create3DMasksGPU(self):
+        # maximum memory capacity observed is: (1520mb is good, 1850MB is bad) # limiting factor: 1200mb!
+        a = time.time()
+        layers, width, height, _ = self.mipImage.shape
+        mipArr = self.mipImage.reshape(layers*height*width, 3)
+        mipArr = af.interop.np_to_af_array(mipArr)
+        channels = mipArr.copy()
+        self.imgChannels = (channels[:, 0], channels[:, 1], channels[:, 2])
+        self.threeDMasks = []
+        for [r, g, b] in self.rgbList:
+            mask = af.constant(0, layers * height * width, dtype=af.Dtype.b8)
+            for ii in af.ParallelRange(layers * height * width):
+                pr, pg, pb = mipArr[ii, 0], mipArr[ii, 1], mipArr[ii, 2]
+                dist = (r - pr) ** 2 + (g - pg) ** 2 + (b - pb) ** 2
+                isCloser = 1
+                for [ar, ag, ab] in self.rgbList:
+                    adist = (ar - pr) ** 2 + (ag - pg) ** 2 + (ab - pb) ** 2
+                    isCloser *= (dist <= adist)
+                mask[ii] = isCloser
+            self.threeDMasks.append(mask)
+        b = time.time()
+        print 'time to create 3D masks with GPU', 1000*(b-a)
+
+    def create3DMasks(self):
+        a = time.time()
+        self.imgChannels = np.split(self.mipImage, 3, axis=3)
+        mipFloat = self.mipImage.astype(np.float32)
+        raxis, gaxis, baxis = np.split(mipFloat, 3, axis=3)
+        self.threeDMasks = []
+        for [r, g, b] in self.rgbList:
+            mask = True
+            dist = ((raxis - r) ** 2 + (gaxis - g) ** 2 + (baxis - b) ** 2)
+            for [ar, ag, ab] in self.rgbList:
+                if [ar, ag, ab] == [r, g, b]:  # don't compare with one's self
+                    continue
+                adist = ((raxis - ar) ** 2 + (gaxis - ag) ** 2 + (baxis - ab) ** 2)
+                mask *= dist <= adist
+            self.threeDMasks.append(mask)
+        b = time.time()
+        print 'time to create 3D Masks with CPU', 1000*(b-a)
+
+    def getHSpans(self):
+        # note: this does not unionize merged colors, it simply uses their average. it does, however
+        # work with deleted colors by clustering with them and not including them in the hSpans
+        # convert rgb lists to hsv lists
+        hsvList = []
+        rgbList = copy.copy(self.modifiedRgbList)
+        for rgb in self.modifiedRgbList:
+            hsvList.append(saving_and_color.rgbtohsv8bit(rgb))
+        hsvFullList = copy.copy(hsvList)
+        for rgb in self.rgbList:  # add deleted rgb values
+            merged = self.original2Merged(rgb)
+            if merged not in self.modifiedRgbList:
+                hsvFullList.append(saving_and_color.rgbtohsv8bit(rgb))
+        # create h field
+        h = np.arange(0, 256, 1, dtype=np.float32)
+        masks = []
+        # create distance-wise masks
+        for [a, b, c] in enumerate(hsvList):
+            mask = True
+            for [oa, ob, oc] in enumerate(hsvFullList):
+                if [a, b, c] == [oa, ob, oc]:  # don't compare with one's self
+                    continue
+                if a == oa:
+                    print 'warning: twin hues were found! one will be deleted'
+                dH = (h - a + 122) % 255 - 122
+                dOH = (h - oa + 122) % 255 - 122
+                dH, dOH = np.absolute(dH), np.absolute(dOH)
+                mask *= dH < dOH
+            masks.append(mask)
+        colorHs = []
+        for mask in masks:
+            shiftedright = np.append(mask[-1], mask[:-1])
+            start = mask * (~ shiftedright)
+            starth = np.nonzero(start)
+            if len(starth[0]) == 0:
+                continue
+            starth = starth[0][0]
+            end = shiftedright * (~ mask)
+            endh = np.nonzero(end)
+            if len(endh[0]) == 0:
+                continue
+            endh = endh[0][0]
+            colorHs.append([starth, endh])
+        return colorHs
 
     def createHSMasks(self):
         def displayChannel(msk):
             img = Image.fromarray(msk)
             img.show()
+
         print 'creating masks'
         # convert rgb lists to hsv lists
         hsvList = []
@@ -245,179 +619,14 @@ class ColorChooser(QtGui.QMainWindow):  # initiated in colorspace
             slate = np.zeros((256, 256), np.uint8)
             slate[mask] = 255
             displayChannel(slate)
-        # convert masks to polygons with cv2.cornerHarris()
-        # return (h, s) coordinates
+            # convert masks to polygons with cv2.cornerHarris()
+            # return (h, s) coordinates
 
-    def getHSpans(self):
-        # convert rgb lists to hsv lists
-        hsvList = []
-        rgbList = copy.copy(self.rgbList)
-        for rgb in rgbList:
-            hsvList.append(saving_and_color.rgbtohsv8bit(rgb))
-        # remove deletions
-        originals = copy.copy(self.modifiedRgbList)
-        for [mc, mcs] in self.merges:
-            originals += mcs
-        for i, color in enumerate(rgbList):
-            if color not in originals:
-                print 'deleted something...'
-                del rgbList[i], hsvList[i]
-        # create h and s planes
-        h = np.arange(0, 256, 1, dtype=np.float32)
-        masks = []
-        # create distance-wise masks
-        for i, [a, b, c] in enumerate(hsvList):
-            mask = True
-            for ii, [oa, ob, oc] in enumerate(hsvList):
-                if i == ii:  # don't compare with one's self
-                    continue
-                if a == oa:
-                    print 'warning: twin hues were found! one will be deleted'
-                dH = (h - a + 122) % 255 - 122
-                dOH = (h - oa + 122) % 255 - 122
-                dH, dOH = np.absolute(dH), np.absolute(dOH)
-                mask *= dH < dOH
-            masks.append(mask)
-        # unionize merges
-        protectedColors = []
-        for [mc, mcs] in self.merges:
-            protectedColors.append(mcs[0])
-            mi = rgbList.index(mcs[0])
-            for moc in mcs[1:]:
-                moi = rgbList.index(moc)
-                masks[mi] += masks[moi]
-                del masks[moi], rgbList[moi]
-                mi = rgbList.index(mcs[0])  # in case the shifting changed the indexing
-        colorHs = []
-        for mask in masks:
-            shiftedright = np.append(mask[-1], mask[:-1])
-            start = mask * (~ shiftedright)
-            starth = np.nonzero(start)
-            if len(starth[0]) == 0:
-                continue
-            starth = starth[0][0]
-            end = shiftedright * (~ mask)
-            endh = np.nonzero(end)
-            if len(endh[0]) == 0:
-                continue
-            endh = endh[0][0]
-            colorHs.append([starth, endh])
-        return colorHs
-
-    def displayRGBImage(self):
-        # convert rgbModifiedList to colorModifiedList
-        # convert rgbMergeList to colorMergeList
-        # for color in modifiedColorList:
-        #   if color in color in colorMergeList, do as below
-        a = time.time()
-        rmasked, gmasked, bmasked = np.split(self.mipImage.copy(), 3, axis=2)
-        mipFloat = self.mipImage.astype(np.float32)
-        raxis, gaxis, baxis = np.split(mipFloat, 3, axis=2)
-        for i, [r, g, b] in enumerate(self.rgbList):
-            mask = True
-            dist = ((raxis - r) ** 2 + (gaxis - g) ** 2 + (baxis - b) ** 2)
-            for ii, [ar, ag, ab] in enumerate(self.rgbList):
-                if ii == i:  # don't compare with one's self
-                    continue
-                adist = ((raxis - ar) ** 2 + (gaxis - ag) ** 2 + (baxis - ab) ** 2)
-                mask *= dist <= adist
-            if [r, g, b] not in self.modifiedRgbList:
-                [r, g, b] = [0, 0, 0]
-            else:
-                for [mc, mcs] in self.merges:
-                    if [r, g, b] in mcs:
-                        [r, g, b] = mc
-                        break
-            rmasked[mask] = r
-            gmasked[mask] = g
-            bmasked[mask] = b
-        maskedImage = np.dstack((rmasked, gmasked, bmasked))
-        b = time.time()
-        print 'full display time', 1000*(b-a)
-        img = Image.fromarray(maskedImage)
-        img.show()
-
-    def displayRGBImageGPU(self):
-        # convert rgbModifiedList to colorModifiedList
-        # convert rgbMergeList to colorMergeList
-        # for color in modifiedColorList:
-        #   if color in color in colorMergeList, do as below
-        a = time.time()
-        rmasked, gmasked, bmasked = np.split(self.mipImage.copy(), 3, axis=2)
-        width, height, _ = self.mipImage.shape
-        # mipFloat = self.mipImage.astype(np.float32)
-        mipArr = af.interop.np_to_af_array(self.mipImage)
-        for i, [r, g, b] in enumerate(self.rgbList):
-            mask = af.constant(0, height*width, dtype=af.Dtype.b8)
-            for ii in af.ParallelRange(height * width):
-                pr, pg, pb= mipArr[ii, 0], mipArr[ii, 1], mipArr[ii, 2]
-                dist = (r - pr) ** 2 + (g - pg) ** 2 + (b - pb) ** 2
-                isCloser = 1
-                for ii, [ar, ag, ab] in enumerate(self.rgbList):
-                    isCloser *= (0 == ((ar == r) & (ag == g) & (ab == b)))  # don't compare with one's self
-                    adist = (ar - pr) ** 2 + (ag - pg) ** 2 + (ab - pb) ** 2
-                    isCloser *= (dist <= adist)
-                mask[ii] *= isCloser
-            mask = np.array(mask)
-            mask = mask.reshape(height, width)
-            if [r, g, b] not in self.modifiedRgbList:
-                [r, g, b] = [0, 0, 0]
-            else:
-                for [mc, mcs] in self.merges:
-                    if [r, g, b] in mcs:
-                        [r, g, b] = mc
-                        break
-            rmasked[mask] = r
-            gmasked[mask] = g
-            bmasked[mask] = b
-        maskedImage = np.dstack((rmasked, gmasked, bmasked))
-        b = time.time()
-        print 'full display time', 1000*(b-a)
-        img = Image.fromarray(maskedImage)
-        img.show()
-
-    def displaySingleRGBImage(self, rgb, forceColor=False, rtrn=False):
-        a = time.time()
-        if forceColor:
-            plane = np.zeros((self.mipImage.shape[0], self.mipImage.shape[1], 1), dtype=np.uint8)
-            rmasked = plane.copy()
-            gmasked = plane.copy()
-            bmasked = plane
-        else:
-            maskedImage = self.mipImage.copy()
-        mipFloat = self.mipImage.astype(np.float32)
-        raxis, gaxis, baxis = np.split(mipFloat, 3, axis=2)
-        stack = [rgb]
-        for [mc, mcs] in self.merges:
-            if mc == rgb:
-                stack = mcs
-                break
-        fullMask = False
-        for [r, g, b] in stack:
-            mask = True
-            dist = ((raxis - r) ** 2 + (gaxis - g) ** 2 + (baxis - b) ** 2)
-            for [ar, ag, ab] in self.rgbList:
-                if [ar, ag, ab] == [r, g, b]:  # don't compare with one's self
-                    continue
-                adist = ((raxis - ar) ** 2 + (gaxis - ag) ** 2 + (baxis - ab) ** 2)
-                mask *= dist <= adist
-            fullMask += mask
-        if forceColor:
-            rmasked[fullMask], gmasked[fullMask], bmasked[fullMask] = rgb  # color takes over its neighbors
-            maskedImage = np.dstack((rmasked, gmasked, bmasked))
-        else:
-            fullMask = np.repeat(fullMask, 3, axis=2)
-            maskedImage[~fullMask] = 0
-        b = time.time()
-        if rtrn:
-            return maskedImage
-        print 'single display time', 1000*(b-a)
-        img = Image.fromarray(maskedImage)
-        img.show()
 
 if __name__ == '__main__':
     app = QtGui.QApplication(sys.argv)
-    ex = ColorChooser([[40, 92, 123], [245, 123, 42], [56, 23, 213], [123, 32, 29]])
+    rgbList = [[40, 92, 123], [245, 123, 42], [56, 23, 213], [123, 32, 29]]
+    ex = ColorChooser(False, False, rgbList, False, True, False)
     ex.show()
     sys.exit(app.exec_())
 

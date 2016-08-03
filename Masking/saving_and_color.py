@@ -9,42 +9,24 @@ import math
 import re
 import time
 import arrayfire as af
+import color_chooser
 
 
 def applyToStack(maps, size, opendirectory, boundsinclude, colorMode, gpuMode):
     if colorMode == 'rgbClusters':
-        [merges, modified, maps] = maps
+        [merges, maps, full] = maps
     # initiate a progress bar
     bar = QtGui.QProgressBar()
     bar.setWindowTitle(QtCore.QString('Applying Mask to Stack...'))
     bar.setWindowModality(QtCore.Qt.WindowModal)
     bar.resize((size * 2), size / 20)
     bar.move(size, size)
-    files = []
-    fileIndices = []
-    number = re.compile(r'\d+')
-    for file in os.listdir(opendirectory):
-        if file.endswith(".tif") and 'mip' not in file:
-            files.append(file)
-            numbers = re.findall(number, file)
-            if len(numbers) != 1:
-                error = QtGui.QMessageBox()
-                error.setText(QtCore.QString('Error! One or more of the input'
-                    ' files does not contain exactly 1 number in the filename, which'
-                    ' is necessary for indexing Tifs by their z-layer. '
-                    'Aborting Save...'))
-                error.exec_()
-                return
-            fileIndices.append(int(numbers[0]))
-    if len(files) == 0:
-        error = QtGui.QMessageBox()
-        error.setText(QtCore.QString('Error! There are not tif files in this '
-            'folder.'))
-        error.exec_()
+    files, opendirectory = getFiles(opendirectory)
+    if not files:
         return
-    files = [y for (x, y) in sorted(zip(fileIndices, files))]
     # update progress bar configuration
-    bar.setMaximum(((len(files) + 2) * len(maps))) ######################### deal with rgb maps
+    mipProgress, dilationProgress = 3, 10
+    bar.setMaximum(((len(files) + (mipProgress + dilationProgress)) * len(maps)))
     progress = 0
     bar.show()
     QtGui.QApplication.processEvents()
@@ -81,15 +63,17 @@ def applyToStack(maps, size, opendirectory, boundsinclude, colorMode, gpuMode):
             rgb = rgb.astype(np.uint8)
         else:   # apply correction to rgb
             [bounds, include] = boundsinclude
-            mappedImage, original = rgbCorrection(original.astype(np.float32), bounds, False, include, both=True)
+            rgb, original = rgbCorrection(original.astype(np.float32), bounds, False, include, both=True)
         originalStack.append(original)
         if colorMode[0:3] != 'rgb':  # it's not 'rgb' or 'rgbClusters'
             if gpuMode:
                 mappedImage = rgb2xyv(rgb, radius, colorMode, only='Numpy')
             else:
                 mappedImage = rgb2xyv(rgb, radius, colorMode)
+        else:
+            mappedImage = rgb
         height, width, numcolors = original.shape
-        if colorMode != 'rgbClusters':
+        if colorMode[0:11] != 'rgbClusters':
             original = original.reshape((height * width), numcolors)
         if numcolors == 3:
             black = [0, 0, 0]
@@ -102,18 +86,12 @@ def applyToStack(maps, size, opendirectory, boundsinclude, colorMode, gpuMode):
                 cropped = original.copy()
                 mipFloat = mappedImage.astype(np.float32)
                 raxis, gaxis, baxis = np.split(mipFloat, 3, axis=2)
-                stack = [map]
-                for [mc, mcs] in merges:
-                    if mc == rgb:
-                        stack = mcs
-                        break
-                if stack[0] not in modified:
-                    continue
+                stack = merged2Originals(map, full, merges)
                 fullMask = False
                 for [r, g, b] in stack:
                     mask = True
                     dist = ((raxis - r) ** 2 + (gaxis - g) ** 2 + (baxis - b) ** 2)
-                    for [ar, ag, ab] in maps:
+                    for [ar, ag, ab] in full:
                         if [ar, ag, ab] == [r, g, b]:  # don't compare with one's self
                             continue
                         adist = ((raxis - ar) ** 2 + (gaxis - ag) ** 2 + (baxis - ab) ** 2)
@@ -121,6 +99,12 @@ def applyToStack(maps, size, opendirectory, boundsinclude, colorMode, gpuMode):
                     fullMask += mask
                 fullMask = np.repeat(fullMask, numcolors, axis=2)
                 cropped[~fullMask] = 0
+            elif colorMode == 'rgbClusters3D':  # warning, this will save 8-bit images
+                mask = map[filenum]
+                mask = mask.astype(bool)
+                mask = ~mask
+                cropped = original.copy()
+                cropped[mask] = 0
             else:
                 if gpuMode:
                     cropped = fullGPUMask(original, size, map, mappedImage)
@@ -183,9 +167,83 @@ def applyToStack(maps, size, opendirectory, boundsinclude, colorMode, gpuMode):
         dilatedMip = np.maximum.reduce(dilatedStack)
         # print 'comparison of the 2 MIPs:', (dilatedMip==mip).all()
         tifffile.imsave((saveDilatedDir + ('MIP_Dilated_Color%d' % (color+1)) + '.tif'), dilatedMip)
-        progress += 1
+        progress += 3
         bar.setValue(progress)
         QtGui.QApplication.processEvents()
+
+def merged2Originals(rgb, rgbList, merges):
+    if type(rgb[0]) is list:
+        stack = rgb
+    else:
+        stack = [rgb]
+    def search(stack):  # a recursive search
+        newstack = []
+        for rgb in stack:
+            if rgb not in rgbList:
+                found = False
+                for [mc, mcs] in merges:
+                    if mc == rgb:
+                        found = True
+                        break
+                if found:
+                    newstack += search(mcs)
+                else:
+                    print 'Error! Recursive search could not find where merged', rgb,
+                    print 'originated from. Aborting...'
+                    return
+            else:
+                newstack += [rgb]
+        return newstack
+    return search(stack)
+
+def getStack(full16Bit=False, withDir=False):
+    dialog = QtGui.QFileDialog()
+    opendirectory = str(dialog.getExistingDirectory())
+    if opendirectory == '':
+        return False
+    files, opendirectory = getFiles(opendirectory)
+    if not files:
+        return False
+    layers = []
+    for file in files:
+        with tifffile.TIFFfile((opendirectory + '/' + file)) as tif:
+            original = tif.asarray()
+        if original.shape[2] == 4:
+            original = original[:, :, 0:3]
+        if not full16Bit and original.dtype == np.uint16:
+            original /= 256
+            original = original.astype(np.uint8)
+        elif original.dtype == np.uint8:
+            print 'Warning! Expected 16-bit images. Continuing with 8-bit images...'
+        layers.append(original)
+    if withDir:
+        return layers, opendirectory
+    return layers
+
+def getFiles(opendirectory):
+    files = []
+    fileIndices = []
+    number = re.compile(r'\d+')
+    for file in os.listdir(opendirectory):
+        if file.endswith(".tif") and 'mip' not in file:
+            files.append(file)
+            numbers = re.findall(number, file)
+            if len(numbers) != 1:
+                error = QtGui.QMessageBox()
+                error.setText(QtCore.QString('Error! One or more of the input'
+                                             ' files does not contain exactly 1 number in the filename, which'
+                                             ' is necessary for indexing Tifs by their z-layer. '
+                                             'Aborting Save...'))
+                error.exec_()
+                return False, False
+            fileIndices.append(int(numbers[0]))
+    if len(files) == 0:
+        error = QtGui.QMessageBox()
+        error.setText(QtCore.QString('Error! There are not tif files in this folder.'))
+        error.exec_()
+        return False, False
+    files = [y for (x, y) in sorted(zip(fileIndices, files))]
+    return files, opendirectory
 
 
 def fullGPUMask(cropped, side, validityMap, fullMap):
@@ -206,7 +264,7 @@ def fullGPUMask(cropped, side, validityMap, fullMap):
         cropped[pos, 0] *= color
         cropped[pos, 1] *= color
         cropped[pos, 2] *= color
-    cropped = np.array(cropped)  # takes 60 ms to convert to numpy (about 40% of function)
+    cropped = np.array(cropped)  # takes about 100 ms, or 2/3 of the time to do this
     cropped = cropped.reshape(height, width, 3)
     return cropped
 

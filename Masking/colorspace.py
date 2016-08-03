@@ -693,7 +693,7 @@ class colorSpaces():
 
     def rescaleAreaXY(self, aX, aY):
         if self.colorMode == 'rgb':
-                    scale = 256
+            scale = 256
         else:
             scale = self.side
         aX, aY = aX * scale, aY * scale
@@ -751,10 +751,14 @@ class colorSpaces():
         else:
             self.areas = self.volumes[self.indexVolume][0]
         oneAreaMode = len(self.areas) == 1 or (len(self.areas) == 2 and not self.areas[1])
-        if self.gpuMode and oneAreaMode:
-            self.validityMap = af.constant(0, 256, self.side, self.side, dtype=af.Dtype.u8)
+        if self.colorMode == 'rgb':
+            side = 256
         else:
-            self.validityMap = np.zeros(shape=(256, self.side, self.side), dtype=np.uint8)
+            side = self.side
+        if self.gpuMode and oneAreaMode:
+            self.validityMap = af.constant(0, 256, side, side, dtype=af.Dtype.u8)
+        else:
+            self.validityMap = np.zeros(shape=(256, side, side), dtype=np.uint8)
         if not self.areas[0]:
             self.validityMap = False
             self.updateDynamic(self.validityMap)
@@ -871,9 +875,9 @@ class colorSpaces():
         return rgbMap
         # this will return an RGB validityMap
 
-    def rgbClusters2Chooser(self, mipImage, boundsInclude, rgbList):
+    def rgbClusters2Chooser(self, mipImage, boundsInclude, rgbList, twoDMode, dir):
         # this only works in 'hsv' mode right now
-        self.chooser = ColorChooser(mipImage, boundsInclude, rgbList, parent=self)
+        self.chooser = ColorChooser(mipImage, boundsInclude, rgbList, self.gpuMode, twoDMode, dir, parent=self)
         self.chooser.show()
         self.chooser.exportButton.released.connect(self.chooser2xyvNodes)
 
