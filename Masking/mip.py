@@ -303,10 +303,11 @@ class mips():
         if yi < 0:  # zoomed out past top side
             yf -= yi
             yi = 0
-        elif yf > my: # zoomed out past bottom side
+        elif yf > my:  # zoomed out past bottom side
             yi -= yf - my
             yf = my
         self.croparea = [xi, yi, xf, yf]  # make new croppedarea official
+        print self.croparea
         self.updateMipView()  # push new croparea to fullView and dynamicView
 
     def shift(self, dir):
@@ -316,7 +317,7 @@ class mips():
         '''
         [xi, yi, xf, yf] = self.croparea
         # move by dx, dy as fraction of current crop area
-        dx, dy = (xf - xi) / 10, (yf - yi) / 10  ############# define as a constant/preferences
+        dx, dy = (xf - xi) / 8, (yf - yi) / 8  ############# define as a constant/preferences
         width, height = self.originalImage.shape[1], self.originalImage.shape[0]
         # move in the direction given by arg 'dir'
         if dir == 'r':

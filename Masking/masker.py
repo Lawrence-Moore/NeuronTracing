@@ -33,7 +33,7 @@ class Run(QtGui.QMainWindow):
         try:
             af.info()
             self.ui.gpuLabel.setText(QtCore.QString('GPU: ON'))
-            self.gpuMode = True ################## debug this!
+            self.gpuMode = True  # Change this back to true when done debugging!
         except:
             self.gpuMode = False
         # make icons from files
@@ -43,7 +43,8 @@ class Run(QtGui.QMainWindow):
         # create color space, attach signal: slider, add event to filter
         self.colorSpace = colorSpaces(self.ui.colorSpace,
             self.ui.intensityLabel, self.ui.intensitySlider, self.ui.volumeSelect,
-            self.ui.drawMenu, self.ui.areaSelectionView, self.colorMode, self.gpuMode)
+            self.ui.drawMenu, self.ui.areaSelectionView, self.ui.saveGrayCheck,
+                                      self.colorMode, self.gpuMode)
         self.ui.intensitySlider.valueChanged.connect(self.colorSpace.updateColorSpaceView)
         self.ui.colorSpace.viewport().installEventFilter(self)
         self.ui.colorSpace.viewport().setMouseTracking(True)
@@ -73,7 +74,8 @@ class Run(QtGui.QMainWindow):
         self.ui.applyStackButton.released.connect(self.savingStack)
         self.ui.editImageButton.released.connect(self.mipViews.editImage)
         self.ui.plotButton.released.connect(self.colorSpace.plotSpace)
-        self.ui.maps2ClusteringButton.released.connect(self.maps2ClusteringStart)
+        self.ui.somButton.released.connect(self.setSOMMode)
+        self.ui.kMeansButton.released.connect(self.setKMeansMode)
         self.ui.neuronsDoneButton.setVisible(False)
         self.ui.neuronsDoneButton.released.connect(self.maps2ClusteringFinish)
         self.ui.getMapsButton.released.connect(self.getMaps)
@@ -98,8 +100,15 @@ class Run(QtGui.QMainWindow):
             self.colorSpace.createValidityMap()
 
     def getMaps(self):
-        print 'hi!'
         maps = self.colorSpace.saveStack(saving=False)
+
+    def setSOMMode(self):
+        self.kMeansMode = False
+        self.maps2ClusteringStart()
+
+    def setKMeansMode(self):
+        self.kMeansMode = True
+        self.maps2ClusteringStart()
 
     def maps2ClusteringStart(self):
         if not self.mipViews.filename:
@@ -114,14 +123,16 @@ class Run(QtGui.QMainWindow):
         self.mipViews.updateMipView()
 
     def maps2ClusteringFinish(self):
+        # get threshold and 2D Mode values from GUI
+        thresholdVal = self.ui.thresholdMenu.currentIndex()
+        if thresholdVal == 0:
+            thresholdVal = False
+        twoDMode = self.ui.twoDModeCheck.isChecked()
 
         # neurons list is xyv
         neuronsList = copy.copy(self.mipViews.selectedNeurons)
         colormode = self.colorMode
-
         radius = self.colorSpace.side / 2
-
-
         # k_means(self.mipViews.originalImage, neuronsList, n_colors=len(neuronsList))
         neuronsList = xyvLst2rgb(neuronsList, radius, colormode)
         weights = [np.array(weight) for weight in neuronsList]
@@ -129,13 +140,17 @@ class Run(QtGui.QMainWindow):
 
         # make sure it's on the 0 - 1 scale
         weights = weights.astype(float) / np.max(weights)
-        twoDMode = False
         if twoDMode:
             img = self.mipViews.originalImage.copy()
-            k_centers = k_means(image=img, n_colors=len(weights), threshold=True)
+            if self.kMeansMode:
+                print 'im clustering with kmeans'
+                centers = k_means(image=img, n_colors=len(weights), threshold=thresholdVal)
+            else:
+                print 'im clustering with som'
+                centers = self_organizing_map(image=img, weights=weights, n_colors=len(weights), threshold=thresholdVal)
             dir = False
         else:
-            # initialize progress bar
+            # initialize a progress bar
             bar = QtGui.QProgressBar()
             bar.setWindowTitle(QtCore.QString('Reading stack...'))
             bar.setWindowModality(QtCore.Qt.WindowModal)
@@ -144,22 +159,28 @@ class Run(QtGui.QMainWindow):
             bar.move(size, size)
             bar.setMaximum(3)
             bar.show()
-            img, dir = getStack(full16Bit=False, withDir=True)
+            img, dir = getStack(self.mipViews.boundsInclude, full16Bit=False, withDir=True)
             bar.setValue(1)
-            bar.setWindowTitle(QtCore.QString('Clustering stack with k-means...'))
-            QtGui.QApplication.processEvents()
             if not img:  # user cancelled by not choosing open directory
                 return
-            k_centers = k_means(images=img, n_colors=len(weights), threshold=True)
+            if self.kMeansMode:
+                bar.setWindowTitle(QtCore.QString('Clustering stack with k-means...'))
+                QtGui.QApplication.processEvents()
+                centers = k_means(images=img, n_colors=len(weights), threshold=thresholdVal)
+            else:
+                bar.setWindowTitle(QtCore.QString('Clustering stack with som...'))
+                QtGui.QApplication.processEvents()
+                centers = self_organizing_map(images=img, weights=weights, n_colors=len(weights), threshold=thresholdVal)
             bar.setValue(2)
             bar.setWindowTitle(QtCore.QString('Masking stack with clusters...'))
             QtGui.QApplication.processEvents()
-        # som_clustered_img, som_centers = self_organizing_map(image=img, weights=weights, n_colors=len(weights), threshold=True)
-        k_centers *= 256
-        rgbList = k_centers.astype(np.uint8)
+        # convert centers to RGB
+        print centers.shape, centers
+        centers *= 256
+        rgbList = centers.astype(np.uint8)
         rgbList = rgbList.tolist()
-        # self.colorSpace.rgbClusters2Chooser(self.mipViews.originalImage.copy(), (rgbList + neuronsList))
-        self.colorSpace.rgbClusters2Chooser(img, self.mipViews.boundsInclude, rgbList, twoDMode, dir)
+        preferences = [self.kMeansMode, twoDMode, thresholdVal]
+        self.colorSpace.rgbClusters2Chooser(img, self.mipViews.boundsInclude, rgbList, preferences, dir)
         if not twoDMode:
             bar.close()
         # copy.copy(self.mipViews.boundsInclude) -> this is for image correction
@@ -190,6 +211,8 @@ class Run(QtGui.QMainWindow):
         self.ui.saveDynamicButton.move(x, y)
         x += self.ui.saveDynamicButton.width() + 5
         self.ui.applyStackButton.move(x, y)
+        y -= self.ui.saveGrayCheck.height()
+        self.ui.saveGrayCheck.move(x, y)
         x = width / 2
         y = 15
         side = (height / 2) - 30
@@ -203,9 +226,13 @@ class Run(QtGui.QMainWindow):
         self.ui.mipDynamic.move(x, ay)
         ax = x + dside + 10
         self.ui.getMapsButton.move(ax, ay)
-        ay += dside - self.ui.maps2ClusteringButton.height()
-        self.ui.maps2ClusteringButton.move(ax, ay)
-        self.ui.neuronsDoneButton.move(ax, ay - self.ui.neuronsDoneButton.height() - 5)
+        ay += dside + 5
+        for button in [self.ui.neuronsDoneButton, self.ui.kMeansButton,
+                self.ui.somButton, self.ui.twoDModeCheck,self.ui.thresholdMenu]:
+            ay -= button.height() + 5
+            button.move(ax, ay)
+        ax += self.ui.thresholdMenu.width() + 5
+        self.ui.thresholdLabel.move(ax, ay)
         self.ui.mipDynamic.resize(dside, dside)
         x += fside + 10
         bside, bseparation = side * .08, side * .1
@@ -431,8 +458,8 @@ if __name__ == '__main__':
 # 7/6: created gui (CorrectionWin) to normalize and align images
 # 7/7: commented CorrectWin and mip modules
 # 7/7: created progress bars inside both CorrectWin GUI and main GUI for import
-# 7/8: commented mip module, sped up color space conversion with matrix
-    # multiplication as well as remaking the view in main GUI
+# 7/8: sped up color space conversion with matrix multiplication
+
 # Week of 7/11:
 # 7/11: made saving to-stack operations for both GUIs
 # 7/12: removed dynamic updating of mipDynamic (too slow),
@@ -462,25 +489,33 @@ if __name__ == '__main__':
 # size of drawn nodes in colorspace in masker gui rescales too
 # implemented gpu function for applying color mask to individual layers and
 # saving stack offers up to a 15-fold increase in performance (2500ms -> 150ms)
-# added interface to delete, split, view, merge colors from k-mean clusters
-# implemented frame dropping in adjusting slider in colorspace
+# created color_chooser gui for rgb clustering with delete, view, merge
+# Week of 8/1:
+# added to color_chooser: split, save2stack, export to gui, and view functions
+# convert polygons from clustering to nodes for colorspace view
+# created color_chooser gui for rgb clustering with merge, split, delete,
+    # save2stack, export to gui, and view functions
+# replaced tinting of selected colors with outlining on gray background
+    # implemented view functions in rgb clustering with gpu as well
+# apply2stack optionally saves stack as averaged, mean(r, g, b), one channel tifs
+# 3D image to rgb clustering
+# fitting convex polygons to validitymap for one-area drawings in colorspace
+# threshold field for som and k-means in masker gui
+# alignment wiggle and threshold fields in correctionwin gui
 
 # need to do:
     # hook color_chooser to masker
-    # convert polygons from clustering to nodes for colorspace view
     # set to drawingareas. then go through every color/volume and draw currentArea
     # then, push to display
-# debug: delete the last color does not update dynamic
+# disclaimer: does not do convex  on y-axis for multiple-areas (closes folds first)
+# to fix: gpu clustering on images > 1.2 GB in size (as a function of GPU mem?)
+
 # add apply2stack feature in k-means
 # debug: pictures in icons displaying in windows
-# zoom/edit image in CorrectionWin
 # combine both CorrectionWin and masker GUIs into one gui
 # add preference pane
-# when merging/deleting colors with gui tool, implement quick view into
-# displaying image (offload viewing function from clustering module)
 # for zoom/pan, scroll into/out of the mouse position
-
-# preferences: clustering option to do on 3D or 2D image
+# zoom/edit image in CorrectionWin
 
 # time-performance log:
 # 6/24: 2D Simple with 200^2 pixels: (MappedMip: 470ms), (Updating: 35ms)

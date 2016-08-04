@@ -12,13 +12,14 @@ import minisom
 from image_normalization import k_means, self_organizing_map, display_image
 
 class ColorChooser(QtGui.QMainWindow):  # initiated in colorspace
-    def __init__(self, mipImage, boundsInclude, rgbList, gpuMode, twoDMode, dir, parent=None):
+    def __init__(self, mipImage, boundsInclude, rgbList, gpuMode, prefs, dir, grayscale, parent=None):
         QtGui.QMainWindow.__init__(self)
         self.setStyleSheet('QMainWindow {background-color: gray;}')
         self.doneInitializing = False
         self.openDirectory = dir
+        self.grayScale = grayscale
         self.shadeSelected = False  # can be changed in preferences
-        self.gpuMode = gpuMode  # gpuMode
+        self.gpuMode = gpuMode
         self.mipImage = np.array(mipImage)  # in case 3D, assembles input as a single numpy array
         self.width, self.height = 800, 400
         self.setGeometry(QtCore.QRect(200, 200, self.width, self.height))
@@ -62,6 +63,7 @@ class ColorChooser(QtGui.QMainWindow):  # initiated in colorspace
         # view
         self.reset()
         self.merges = []  # [merged color, [origins of merge]]
+        [self.kMeansMode, twoDMode, self.thresholdVal] = prefs
         if twoDMode:
             self.numDims = 2
         else:
@@ -92,6 +94,8 @@ class ColorChooser(QtGui.QMainWindow):  # initiated in colorspace
         self.reset()
 
     def clearSelection(self):
+        print 'modified:', self.modifiedRgbList
+        print 'original:', self.rgbList
         while True in self.selectedViews:
             i = self.selectedViews.index(True)
             if self.shadeSelected:
@@ -104,21 +108,27 @@ class ColorChooser(QtGui.QMainWindow):  # initiated in colorspace
             colors = []
             for rgb in self.modifiedRgbList:
                 colors.append(self.displaySingle3DImage(rgb, rtrn=True))
-            saving_and_color.applyToStack(colors, (self.width / 2), self.openDirectory, self.boundsInclude,
-                                          'rgbClusters3D', self.gpuMode)
+            saving_and_color.applyToStack(colors, (self.width / 2),
+                    self.openDirectory, self.boundsInclude, 'rgbClusters3D',
+                                          self.gpuMode, self.grayScale)
         else:
             dialog = QtGui.QFileDialog()
             opendirectory = str(dialog.getExistingDirectory())
             if opendirectory == '':
                 return
-            saving_and_color.applyToStack([self.merges, self.modifiedRgbList, self.rgbList], (self.width / 2),
-                                          opendirectory, self.boundsInclude, 'rgbClusters', self.gpuMode)
+            saving_and_color.applyToStack([self.merges, self.modifiedRgbList,
+                    self.rgbList], (self.width / 2), opendirectory,
+                    self.boundsInclude, 'rgbClusters', self.gpuMode, self.grayScale)
 
     def split(self):
+        # [self.kMeansMode, twoDMode, self.thresholdVal]
         i = self.selectedViews.index(True)
         if self.numDims == 2:
             img = self.displaySingleRGBImage(self.modifiedRgbList[i], rtrn=True)
-            k_clustered_img, k_centers = k_means(image=img, n_colors=2, threshold=True)
+            if self.kMeansMode:
+                centers = k_means(image=img, n_colors=2, threshold=self.thresholdVal)
+            else:
+                centers = self_organizing_map(image=img, n_colors=2, threshold=self.thresholdVal)
         else:
             # initialize progress bar
             bar = QtGui.QProgressBar()
@@ -130,15 +140,24 @@ class ColorChooser(QtGui.QMainWindow):  # initiated in colorspace
             bar.show()
             img = self.displaySingle3DImage(self.modifiedRgbList[i], rtrn=True)
             bar.setValue(1)
-            bar.setWindowTitle(QtCore.QString('Clustering stack with k-means...'))
-            QtGui.QApplication.processEvents()
-            k_clustered_img, k_centers = k_means(images=img, n_colors=2, threshold=True)
+            if self.kMeansMode:
+                bar.setWindowTitle(QtCore.QString('Clustering stack with k-means...'))
+                QtGui.QApplication.processEvents()
+                centers = k_means(images=img, n_colors=2, threshold=self.thresholdVal)
+            else:
+                bar.setWindowTitle(QtCore.QString('Clustering stack with som...'))
+                QtGui.QApplication.processEvents()
+                centers = self_organizing_map(images=img, n_colors=2, threshold=self.thresholdVal)
         self.selectedViews[i] = False
-        k_centers *= 256
-        rgbList = k_centers.astype(np.uint8)
+        centers *= 256
+        rgbList = centers.astype(np.uint8)
         rgbList = rgbList.tolist()
         assert len(rgbList) == 2
-        ii = self.rgbList.index(self.modifiedRgbList[i])
+        originals = self.merged2Originals(self.modifiedRgbList[i])
+        while len(originals) > 1:
+            self.rgbList.remove(originals[-1])
+            del originals[-1]
+        ii = self.rgbList.index(originals[0])
         self.rgbList[ii] = rgbList[0]
         self.rgbList.insert(ii, rgbList[1])
         self.modifiedRgbList[i] = rgbList[0]
@@ -146,7 +165,7 @@ class ColorChooser(QtGui.QMainWindow):  # initiated in colorspace
         self.reset()
         if self.numDims == 3:
             bar.setValue(2)
-            bar.setWindowTitle(QtCore.QString('Assigning pixels in stack to clusters...'))
+            bar.setWindowTitle(QtCore.QString('Masking stack with clusters...'))
             QtGui.QApplication.processEvents()
             if self.gpuMode:
                 self.create3DMasksGPU()
@@ -189,9 +208,9 @@ class ColorChooser(QtGui.QMainWindow):  # initiated in colorspace
         numColors = float(len(colors))
         merged = [0, 0, 0]
         for [r, g, b] in colors:
-            merged[0] += r / numColors
-            merged[1] += g / numColors
-            merged[2] += b / numColors
+            merged[0] += int(r / numColors)
+            merged[1] += int(g / numColors)
+            merged[2] += int(b / numColors)
         self.modifiedRgbList[first] = merged
         self.merges.append([merged, colors])
         self.reset(hard=False)
@@ -450,6 +469,7 @@ class ColorChooser(QtGui.QMainWindow):  # initiated in colorspace
         rmasked, gmasked, bmasked = self.imgChannels[0].copy(), self.imgChannels[1].copy(), self.imgChannels[2].copy()
         for rgb in self.modifiedRgbList:
             stack = self.merged2Originals(rgb)
+            print rgb, 'my stack:', stack
             fullMask = False
             for color in stack:
                 i = self.rgbList.index(color)
@@ -477,7 +497,8 @@ class ColorChooser(QtGui.QMainWindow):  # initiated in colorspace
         img.show()
 
     def create3DMasksGPU(self):
-        # maximum memory capacity observed is: (1520mb is good, 1850MB is bad) # limiting factor: 1200mb!
+        # safe factor: (on smaller gpu) is 126mb and 5 colors
+        # safe factor: (on larger gpu) is 1520mb and 3? colors
         a = time.time()
         layers, width, height, _ = self.mipImage.shape
         mipArr = self.mipImage.reshape(layers*height*width, 3)
@@ -524,23 +545,22 @@ class ColorChooser(QtGui.QMainWindow):  # initiated in colorspace
         hsvList = []
         rgbList = copy.copy(self.modifiedRgbList)
         for rgb in self.modifiedRgbList:
-            hsvList.append(saving_and_color.rgbtohsv8bit(rgb))
+            hsvList.append(saving_and_color.rgbtohsv8bit(rgb)[0])
         hsvFullList = copy.copy(hsvList)
         for rgb in self.rgbList:  # add deleted rgb values
             merged = self.original2Merged(rgb)
             if merged not in self.modifiedRgbList:
-                hsvFullList.append(saving_and_color.rgbtohsv8bit(rgb))
+                hsvFullList.append(saving_and_color.rgbtohsv8bit(rgb)[0])
+        hsvList, hsvFullList = set(hsvList), set(hsvFullList)
         # create h field
         h = np.arange(0, 256, 1, dtype=np.float32)
         masks = []
         # create distance-wise masks
-        for [a, b, c] in enumerate(hsvList):
+        for a in hsvList:
             mask = True
-            for [oa, ob, oc] in enumerate(hsvFullList):
-                if [a, b, c] == [oa, ob, oc]:  # don't compare with one's self
-                    continue
+            for oa in hsvFullList:
                 if a == oa:
-                    print 'warning: twin hues were found! one will be deleted'
+                    continue
                 dH = (h - a + 122) % 255 - 122
                 dOH = (h - oa + 122) % 255 - 122
                 dH, dOH = np.absolute(dH), np.absolute(dOH)

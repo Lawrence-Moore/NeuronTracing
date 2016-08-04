@@ -21,7 +21,7 @@ from color_chooser import ColorChooser
 
 class colorSpaces():
     def __init__(self, colorspace, intensitylabel, intensityslider,
-                 volumeselect, drawmenu, areaselectionview, colormode, gpumode):
+                 volumeselect, drawmenu, areaselectionview, graycheck, colormode, gpumode):
         self.colorMode = colormode  # vs 'hsv'
         self.gpuMode = gpumode
         self.view = colorspace  # QGraphicsView: graphics window for color space
@@ -29,7 +29,7 @@ class colorSpaces():
         self.intensitySlider = intensityslider  # slider for intensity v in HSV
         # self.side = int: side length of the colorspace graphics window
         self.createColorSpaceView()  # create the colorspace image to scale
-        self.mouseHold = False  # the mouse is not currently pressed/held
+        self.mouseHold = True  # the mouse is not currently pressed/held
         # self.csImageVal = int: current intensity v of the colorspace view
         # self.csImage = QImage: image of the current colorspace at v = 255
         # self.currentImage = QImage: current drawings on transparent background
@@ -66,6 +66,7 @@ class colorSpaces():
         # of colorspace that represents mask with bool:True/False
         self.nodeSize = [-2, 3]  # size of nodes drawn in colorspace
         self.validityMap = False
+        self.saveGray = graycheck
         self.doneDrawing = True  # frame dropping for manualUpdate
 
     def addDynamicView(self, update):
@@ -700,7 +701,7 @@ class colorSpaces():
         aX, aY = aX.astype(np.uint16), aY.astype(np.uint16)
         return aX, aY
 
-    def numpyAreas2Dict(self, area):
+    def numpyAreas2Dict(self, area, convex=False):
         # sorting function for createValidityMap
         dict = {}
         minx = self.side
@@ -710,31 +711,34 @@ class colorSpaces():
         areaX, areaY = areaX.tolist(), areaY.tolist()
         for (x, y) in sorted(zip(areaX, areaY)):  # sort by the x's
             if x in dict:  # append like [min, max]
-                if len(dict[x]) == 2:
-                    if y > dict[x][1]:
-                        dict[x][1] = y
-                    elif y < dict[x][0]:
-                        dict[x][0] = y
+                if not convex:
+                    if len(dict[x]) == 2:
+                        if y > dict[x][1]:
+                            dict[x][1] = y
+                        elif y < dict[x][0]:
+                            dict[x][0] = y
+                    else:
+                        if y > dict[x][0]:
+                            dict[x].append(y)
+                        elif y < dict[x][0]:  # if y == dict[x][0], error will be thrown
+                            [temp] = dict[x]
+                            del dict[x]
+                            dict[x] = [y, temp]
                 else:
-                    if y > dict[x][0]:
-                        dict[x].append(y)
-                    elif y < dict[x][0]:  # if y == dict[x][0], error will be thrown
-                        [temp] = dict[x]
-                        del dict[x]
-                        dict[x] = [y, temp]
+                    dict[x].append(y)
             else:
                 dict[x] = [y]
             if x < minx:
                 minx = x
             if x > maxx:
                 maxx = x
-        while len(dict[minx]) != 2:  # don't get edge of one point
+        while len(dict[minx]) < 2:  # don't get edge of one point
             del dict[minx]
             minx += 1
             while minx not in dict:
                 minx -= 1
         dict['i'] = minx
-        while len(dict[maxx]) != 2:  # don't get edge
+        while len(dict[maxx]) < 2:  # don't get edge
             del dict[maxx]
             maxx -= 1
             while maxx not in dict:
@@ -764,14 +768,27 @@ class colorSpaces():
             self.updateDynamic(self.validityMap)
             return
         if oneAreaMode:
-            dict = self.numpyAreas2Dict(self.areas[0])
+            dict = self.numpyAreas2Dict(self.areas[0], convex=True)
             minx, maxx = dict['i'], dict['f']
             for x in xrange(minx, (maxx + 1)):
                 try:
-                    [ymin, ymax] = dict[x]
+                    bounds = dict[x]
+                    if len(bounds) == 2:
+                        newbounds = bounds
+                    else:
+                        newbounds = [bounds[0]]
+                        for i in xrange(1, len(bounds)):
+                            if abs(bounds[i] - bounds[i - 1]) > 2:
+                                newbounds.append(bounds[i])
+                        if len(newbounds) % 2 == 1:
+                            del newbounds[-1]
                 except:
                     pass  # use previous values
-                self.validityMap[0:256, x, ymin:ymax] = 1
+                for i in xrange(0, len(newbounds), 2):
+                    try:
+                        self.validityMap[0:256, x, newbounds[i]:newbounds[i + 1]] = 1
+                    except:
+                        print 'ERROR!', len(newbounds), i, x
             if push:
                 b = time.time()
                 print 'time to create simple validitymap', 1000*(b-a)
@@ -842,6 +859,8 @@ class colorSpaces():
             plotspace.displayValidityMap(self.validityMap, 8, 120)
 
     def saveStack(self, boundsinclude=False, saving=True):
+        if type(self.volumes[self.indexVolume]) is bool and len(self.volumes) == 1:
+            return
         if saving:
             dialog = QtGui.QFileDialog()
             opendirectory = str(dialog.getExistingDirectory())
@@ -860,7 +879,8 @@ class colorSpaces():
                         self.indexArea] = self.volumes[self.indexVolume]
         if saving:
             saving_and_color.applyToStack(maps, self.view.width(),
-                    opendirectory, boundsinclude, self.colorMode, self.gpuMode)
+                    opendirectory, boundsinclude, self.colorMode, self.gpuMode,
+                                self.saveGray.isChecked())
         else:
             return maps
 
@@ -875,9 +895,10 @@ class colorSpaces():
         return rgbMap
         # this will return an RGB validityMap
 
-    def rgbClusters2Chooser(self, mipImage, boundsInclude, rgbList, twoDMode, dir):
+    def rgbClusters2Chooser(self, mipImage, boundsInclude, rgbList, prefs, dir):
         # this only works in 'hsv' mode right now
-        self.chooser = ColorChooser(mipImage, boundsInclude, rgbList, self.gpuMode, twoDMode, dir, parent=self)
+        self.chooser = ColorChooser(mipImage, boundsInclude, rgbList, self.gpuMode,
+                prefs, dir, self.saveGray.isChecked(), parent=self)
         self.chooser.show()
         self.chooser.exportButton.released.connect(self.chooser2xyvNodes)
 
