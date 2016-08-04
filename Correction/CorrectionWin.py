@@ -99,6 +99,7 @@ class Correction(QtGui.QMainWindow):
             bar.setValue(currentProgress)
             QtGui.QApplication.processEvents()
         self.unalignedImages[2] = thresholdedImages
+        bar.close()
         if not self.alignMode:
             self.alignMode = True
             self.alignImages()
@@ -212,7 +213,7 @@ class Correction(QtGui.QMainWindow):
             bar.setWindowModality(QtCore.Qt.WindowModal)
             bar.resize((self.ui.beforeView.width()), (self.ui.beforeView.width() / 20))
             bar.move(self.ui.beforeView.width(), self.ui.beforeView.width())
-            bar.setMaximum(2)
+            bar.setMaximum(4)
             bar.show()
             QtGui.QApplication.processEvents()
             # finish initiating progress bar
@@ -233,9 +234,11 @@ class Correction(QtGui.QMainWindow):
                 self.ui.alignField.setText(QtCore.QString(str(5)))
             minWiggle, maxWiggle = 2, (self.selectedRect[2] - self.selectedRect[0]) / 2
             if wiggle < minWiggle:
+            	print 'wiggle was upgraded to min value of ', minWiggle
                 wiggle = minWiggle
                 self.ui.alignField.setText(QtCore.QString(str(minWiggle)))
             elif wiggle > maxWiggle:
+            	print 'wiggle was downgraded to max value of ', maxWiggle
                 wiggle = maxWiggle
                 self.ui.alignField.setText(QtCore.QString(str(maxWiggle)))
             print x, y, width, colorlayer, self.indexLayer, wiggle  # my args
