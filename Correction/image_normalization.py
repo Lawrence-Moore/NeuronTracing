@@ -48,14 +48,16 @@ def normalize_colors(images, threshold_std=False, std_multiple=0):
 
     # go through the images and calculate the mean and standard deviation of each
     normalized_layers = []
-    for image, mask in zip(images, masks):
-        # iterate through the color layers
-        image = image.copy()
-        layers = []
-        if threshold_std:
+    if threshold_std:
+        for image, mask in zip(images, masks):
+            image = image.copy()
             image[mask] = (((image[mask] - np.mean(image[mask])) / np.std(image[mask])) * std) + mean
             normalized_layers.append(image)
-        else:
+    else:
+        for image in images:
+            # iterate through the color layers
+            image = image.copy()
+            layers = []
             for layer_index in [0, 1, 2]:
                 layer = image[:, :, layer_index].copy()
 
