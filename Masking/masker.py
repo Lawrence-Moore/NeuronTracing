@@ -33,7 +33,7 @@ class Run(QtGui.QMainWindow):
         try:
             af.info()
             self.ui.gpuLabel.setText(QtCore.QString('GPU: ON'))
-            self.gpuMode = True  # Change this back to true when done debugging!
+            self.gpuMode = gpuMode  # Change this back to true when done debugging!
         except:
             self.gpuMode = False
         # make icons from files
