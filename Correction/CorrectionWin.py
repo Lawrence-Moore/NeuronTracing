@@ -204,7 +204,7 @@ class Correction(QtGui.QMainWindow):
             # push new labels
             self.ui.alignField.setVisible(False)
             self.alignMode = False
-            print 'aligned...ready for alignment'
+            print 'unaligned...ready for alignment'
             self.ui.channelSelectMenu.setVisible(False)
             QtGui.QApplication.processEvents()
             # initiate a progress bar
@@ -279,7 +279,7 @@ class Correction(QtGui.QMainWindow):
             self.ui.layerSlider.setMaximum((len(self.unalignedData[0]) - 1))
             self.ui.alignButton.setText(QtCore.QString('Align'))
             self.alignMode = True
-            print 'unaligned...ready for alignment'
+            print 'was unaligned'
             self.ui.alignField.setVisible(True)
             self.ui.channelSelectMenu.setVisible(True)
             self.ui.channelSelectMenu.setCurrentIndex(0)
