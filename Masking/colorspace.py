@@ -753,7 +753,8 @@ class colorSpaces():
             copy.deepcopy(self.areaViewPoints), copy.deepcopy(self.drawingAreas),
                                           copy.copy(self.indexArea)]
         else:
-            self.areas = self.volumes[self.indexVolume][0]
+            if self.volumes[self.indexVolume]:
+                self.areas = self.volumes[self.indexVolume][0]
         oneAreaMode = len(self.areas) == 1 or (len(self.areas) == 2 and not self.areas[1])
         if self.colorMode == 'rgb':
             side = 256

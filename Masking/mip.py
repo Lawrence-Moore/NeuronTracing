@@ -98,6 +98,7 @@ class mips():
             self.selectionMask.setPixel(right, y, color)
             self.selectionMask.setPixel(left, y, color)
         self.updateMipView(cleanMask=False)
+        self.drawDynamicView()
         if neuronSelecting:
             self.selectedNeurons.append([avgX, avgY, avgV])
             return
@@ -164,7 +165,8 @@ class mips():
         self.fullView.show()
         # rescale rgb data to dynamic view and save as self.dynamicImage attribute
         self.dynamicImage = cv2.resize(self.fullImage, (self.dynamicView.width(), self.dynamicView.height()))
-        self.updateDynamic(self.validityMap)
+        if cleanMask:
+            self.updateDynamic(self.validityMap)
 
     def createMappedMip(self):
         '''
@@ -351,7 +353,7 @@ class mips():
         self.croparea = [xi, yi, xf, yf]  # make new croppedarea official
         self.updateMipView()  # push new croparea to fullView and dynamicView
 
-    def drawDynamicView(self, data):
+    def drawDynamicView(self, data=False):
         '''
         :param data: numpy array of dim(width, height, RGB) that is of the size
         of dynamicView
@@ -359,8 +361,12 @@ class mips():
         the dynamicView graphics window
         '''
         # convert from numpy array to QImage
-        img = QtGui.QImage(data, data.shape[1], data.shape[0],
+        if type(data) is bool:
+            img = self.pastDynamicImage
+        else:
+            img = QtGui.QImage(data, data.shape[1], data.shape[0],
                             data.shape[1] * 3, QtGui.QImage.Format_RGB888)
+            self.pastDynamicImage = img
         # create the graphics scene
         scene = QtGui.QGraphicsScene()
         scene.setSceneRect(0, 0, self.dynamicView.width(), self.dynamicView.height())
