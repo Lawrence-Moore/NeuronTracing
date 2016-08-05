@@ -65,6 +65,7 @@ class Correction(QtGui.QMainWindow):
         self.ui.alignField.setVisible(False)
 
     def changeThreshold(self, i):
+        print type(i)
         originalData, thresholdVal = read_czi_file(self.filename), int(i)
         # initiate a progress bar
         bar = QtGui.QProgressBar()
@@ -212,7 +213,7 @@ class Correction(QtGui.QMainWindow):
             bar.setWindowModality(QtCore.Qt.WindowModal)
             bar.resize((self.ui.beforeView.width()), (self.ui.beforeView.width() / 20))
             bar.move(self.ui.beforeView.width(), self.ui.beforeView.width())
-            bar.setMaximum(2)
+            bar.setMaximum(4)
             bar.show()
             QtGui.QApplication.processEvents()
             # finish initiating progress bar
