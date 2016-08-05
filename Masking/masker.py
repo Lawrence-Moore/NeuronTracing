@@ -32,10 +32,11 @@ class Run(QtGui.QMainWindow):
         self.ui.setupUi(self)
         try:
             af.info()
-            self.ui.gpuLabel.setText(QtCore.QString('GPU: ON'))
-            self.gpuMode = gpuMode  # Change this back to true when done debugging!
+            self.ui.gpuCheck.setText(QtCore.QString('GPU: ON'))
+            self.gpuAvailable, self.gpuMode = True, True
         except:
-            self.gpuMode = False
+            self.ui.gpuCheck.setText(QtCore.QString('GPU: OFF'))
+            self.gpuAvailable, self.gpuMode = False, False
         # make icons from files
         self.toolIcon = QtGui.QIcon(QtCore.QString('images/tool.png'))
         self.cubeIcon = QtGui.QIcon(QtCore.QString('images/cube.png'))
@@ -79,10 +80,29 @@ class Run(QtGui.QMainWindow):
         self.ui.neuronsDoneButton.setVisible(False)
         self.ui.neuronsDoneButton.released.connect(self.maps2ClusteringFinish)
         self.ui.getMapsButton.released.connect(self.getMaps)
+        self.ui.gpuCheck.stateChanged.connect(self.changeGPUMode)
 
     def resizeEvent(self, event):
         width, height = event.size().width(), event.size().height()
         self.remakeLayout(width, height)
+
+    def changeGPUMode(self, mode):
+        print mode
+        if self.gpuAvailable:
+            modes = [self.gpuMode, self.colorSpace.gpuMode, self.mipViews.gpuMode]
+            if mode == 2:  # is checked
+                mode = True
+                self.ui.gpuCheck.setText(QtCore.QString('GPU: ON'))
+            elif mode == 0:
+                mode = False
+                self.ui.gpuCheck.setText(QtCore.QString('GPU: OFF'))
+            [self.gpuMode, self.colorSpace.gpuMode, self.mipViews.gpuMode] = [mode] * 3
+            QtGui.QApplication.processEvents()
+            self.colorSpace.createValidityMap(push=False)
+            if not mode:
+            	QtGui.QApplication.processEvents()
+            	self.mipViews.createMappedMip()
+            self.colorSpace.updateDynamic(self.colorSpace.validityMap)
 
     def colorModeChange(self, text):
         if text == 'HSV':
@@ -288,7 +308,7 @@ class Run(QtGui.QMainWindow):
         y = height / 4 + side + 20
         self.ui.debugLabel.move(20, y)
         self.ui.debugLabel.resize((width / 2 - 100), (height - y - 50))
-        self.ui.gpuLabel.move((width - self.ui.gpuLabel.width()), (height - self.ui.gpuLabel.height()))
+        self.ui.gpuCheck.move((width - self.ui.gpuCheck.width()), (height - self.ui.gpuCheck.height()))
         # resize the mip views
         if self.mipViews.filename:
             self.mipViews.updateMipView()
