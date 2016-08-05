@@ -45,11 +45,11 @@ class MiniSom(object):
         self.learning_rate = learning_rate
         self.sigma = sigma
         if weights is None:
-            self.weights = self.random_generator.rand(x, y, input_len) * 2 - 1  # random initialization
+            self.weights = self.random_generator.rand(x, y, input_len)  # random initialization
             print self.weights.shape
         else:
             # assumes the weights are on a 0 to 1 scale
-            self.weights = weights * 2 - 1
+            self.weights = weights
         for i in range(x):
             for j in range(y):
                 self.weights[i, j] = self.weights[i, j] / fast_norm(self.weights[i, j])  # normalization

@@ -461,12 +461,16 @@ def k_means(image=None, images=None, weights=None, n_colors=64, num_training=100
     return kmeans.cluster_centers_
 
 
-def self_organizing_map(image=None, images=None, weights=None, n_colors=64, dim=None,
-                        num_training=1000, std_multiple=0, threshold=False, show_plot=False):
+def self_organizing_map(image=None, images=None, weights=None, weights_max_value=1, n_colors=64,
+                        dim=None, num_training=1000, std_multiple=0, threshold=False, show_plot=False):
     """
     Cluster an image using a self organizing map
     """
     neuron_pixels, non_neuron_pixels, pixels, image = sample_data(image, images, std_multiple)
+
+    # normalize weights
+    weights = (np.array(weights) / weights_max_value).tolist()
+
 
     if dim is None and weights is not None:
         # figure out a way to spread out the nodes of the som
@@ -481,6 +485,7 @@ def self_organizing_map(image=None, images=None, weights=None, n_colors=64, dim=
         factor = get_factor_closest_to_sqrt(len(weights))
         dim = (factor, len(weights) / factor)
         weights = np.reshape(weights, (dim[0], dim[1], 3))
+
     else:
         if n_colors == 2 or n_colors == 3:
             dim = (1, n_colors)
