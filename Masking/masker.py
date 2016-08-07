@@ -523,7 +523,7 @@ if __name__ == '__main__':
 # threshold field for som and k-means in masker gui
 # alignment wiggle and threshold fields in correctionwin gui
 
-# disclaimer: does not do convex on y-axis for multiple-areas (closes folds first)
+# disclaimer: does not do concave on y-axis for multiple-areas (closes folds first)
 # to fix: gpu clustering on images > 1.2 GB in size (as a function of GPU mem?)
 # debug: pictures in icons displaying in windows
 # combine both CorrectionWin and masker GUIs into one gui
