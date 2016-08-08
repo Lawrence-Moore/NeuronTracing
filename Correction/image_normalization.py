@@ -468,13 +468,12 @@ def self_organizing_map(image=None, images=None, weights=None, weights_max_value
     """
     neuron_pixels, non_neuron_pixels, pixels, image = sample_data(image, images, std_multiple)
 
-    # normalize weights
-    weights = (np.array(weights) / weights_max_value).tolist()
-
-
     if dim is None and weights is not None:
         # figure out a way to spread out the nodes of the som
         # find the factor closest to the square root
+            # normalize weights
+        weights = (np.array(weights) / weights_max_value).tolist()
+
         factor = get_factor_closest_to_sqrt(len(weights))
 
         # it's prime if the factor is 1
