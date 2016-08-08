@@ -301,14 +301,17 @@ class ColorChooser(QtGui.QMainWindow):  # initiated in colorspace
 
     def displayRGBImageGPU(self):
         a = time.time()
-        width, height, _ = self.mipImage.shape
+        height, width, _ = self.mipImage.shape
         mipArr = self.mipImage.reshape(height*width, 3)
         mipArr = af.interop.np_to_af_array(mipArr)
         channels = mipArr.copy()
         rmasked, gmasked, bmasked = channels[:, 0], channels[:, 1], channels[:, 2]
         for [r, g, b] in self.rgbList:
+            # split rmasked, gmasked, and bmasked here by size and then do for-loop on them:
+            # replace height*width by split size:
             mask = af.constant(0, height*width, dtype=af.Dtype.b8)
             for ii in af.ParallelRange(height * width):
+                # pr, pg, pb should in fact be rmasked, gmasked, bmasked
                 pr, pg, pb = mipArr[ii, 0], mipArr[ii, 1], mipArr[ii, 2]
                 dist = (r - pr) ** 2 + (g - pg) ** 2 + (b - pb) ** 2
                 isCloser = 1
@@ -321,6 +324,7 @@ class ColorChooser(QtGui.QMainWindow):  # initiated in colorspace
             else:
                 [r, g, b] = self.original2Merged([r, g, b])
             rmasked[mask], gmasked[mask], bmasked[mask] = r, g, b
+            # close for-loop here and concatenate the masked channels longer
         rmasked, gmasked, bmasked = rmasked.__array__(), gmasked.__array__(), bmasked.__array__()
         maskedImage = np.dstack((rmasked, gmasked, bmasked))
         maskedImage = maskedImage.reshape(height, width, 3)
@@ -331,7 +335,7 @@ class ColorChooser(QtGui.QMainWindow):  # initiated in colorspace
 
     def displaySingleRGBImageGPU(self, rgb, forceColor=False, rtrn=False):
         a = time.time()
-        width, height, _ = self.mipImage.shape
+        height, width, _ = self.mipImage.shape
         mipArr = self.mipImage.reshape(height*width, 3)
         mipArr = af.interop.np_to_af_array(mipArr)
         channels = mipArr.copy()

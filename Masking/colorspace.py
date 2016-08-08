@@ -29,7 +29,7 @@ class colorSpaces():
         self.intensitySlider = intensityslider  # slider for intensity v in HSV
         # self.side = int: side length of the colorspace graphics window
         self.createColorSpaceView()  # create the colorspace image to scale
-        self.mouseHold = True  # the mouse is not currently pressed/held
+        self.mouseHold = False  # the mouse is not currently pressed/held
         # self.csImageVal = int: current intensity v of the colorspace view
         # self.csImage = QImage: image of the current colorspace at v = 255
         # self.currentImage = QImage: current drawings on transparent background
@@ -163,7 +163,7 @@ class colorSpaces():
         self.areaMode = 'manualUpdate'  # change mode to connect nodes
         self.drawMenu.setCurrentIndex(0)
         self.manualSelected = 0
-        self.updateManualBoundary(center, center, False) # draw area with nodes in currentArea
+        self.updateManualBoundary(center, center, False)  # draw area with nodes in currentArea
         self.createAreaView()
         if len(xyv) != 2:
             self.createValidityMap()
@@ -233,10 +233,8 @@ class colorSpaces():
             y = origin[1] + int(radius * math.sin(n * radianInterval))
             if not (dN <= x <= self.side - dN and dN <= y <= self.side - dN):
                 self.currentArea = []
-                error = QtGui.QMessageBox()
-                error.setText(QtCore.QString('Error! There was an error in '
-                'bounding nodes inside the colorspace window. Please debug...'))
-                error.exec_()
+                self.displayError('Error! There was an error in '
+                'bounding nodes inside the colorspace window. Please debug...')
                 return
             self.currentArea.append([x, y])
         self.areaMode = 'manualUpdate'  # change mode to connect nodes
@@ -450,7 +448,7 @@ class colorSpaces():
         if type(redraw) is bool and not clear:  # redraw drawing areas
             # create transparent mask for drawing new areas on
             self.currentImage.fill(QtGui.qRgba(0, 0, 0, 0))
-            if self.areas[0]:
+            if self.areas[self.indexArea]:
                 # change v value at current area in self.area history
                 if self.areaMode == 'auto':
                     self.finalizeBoundary()
@@ -478,6 +476,7 @@ class colorSpaces():
             b = np.full((256, 256), self.csImageVal, dtype=np.uint8)
             r = g = np.arange(0, 256, 1, dtype=np.uint8)
             r, g = np.meshgrid(r, g)
+            # the below 2 lines can be simplified into 1 with stacking
             rgb = np.zeros((256, 256, 3), dtype=np.uint8)
             rgb[:, :, 0], rgb[:, :, 1], rgb[:, :, 2] = r, g, b
         else:
@@ -583,12 +582,12 @@ class colorSpaces():
 
     def loadPreviousArea(self):
         self.createAreaView()
-        type = self.drawingAreas[self.indexArea][0]
+        drawType = self.drawingAreas[self.indexArea][0]
         self.silentSliderSet(self.areas[self.indexArea][2])
-        if type == 'manual':
+        if drawType == 'manual':
             self.areaMode = 'manualUpdate'
             self.manualSelected = 0
-        elif type == 'auto':
+        elif drawType == 'auto':
             self.areaMode = 'auto'
         self.rescaleCurrentArea()
 
@@ -701,7 +700,7 @@ class colorSpaces():
         aX, aY = aX.astype(np.uint16), aY.astype(np.uint16)
         return aX, aY
 
-    def numpyAreas2Dict(self, area, convex=False):
+    def numpyAreas2Dict(self, area, concave=False):
         # sorting function for createValidityMap
         dict = {}
         minx = self.side
@@ -711,7 +710,7 @@ class colorSpaces():
         areaX, areaY = areaX.tolist(), areaY.tolist()
         for (x, y) in sorted(zip(areaX, areaY)):  # sort by the x's
             if x in dict:  # append like [min, max]
-                if not convex:
+                if not concave:
                     if len(dict[x]) == 2:
                         if y > dict[x][1]:
                             dict[x][1] = y
@@ -769,13 +768,14 @@ class colorSpaces():
             self.updateDynamic(self.validityMap)
             return
         if oneAreaMode:
-            dict = self.numpyAreas2Dict(self.areas[0], convex=True)
+            dict = self.numpyAreas2Dict(self.areas[0], concave=True)
             minx, maxx = dict['i'], dict['f']
             for x in xrange(minx, (maxx + 1)):
                 try:
                     bounds = dict[x]
                     if len(bounds) == 2:
-                        newbounds = bounds
+                        if bounds[0] != bounds[1]:
+                            newbounds = bounds
                     else:
                         newbounds = [bounds[0]]
                         for i in xrange(1, len(bounds)):
@@ -789,7 +789,8 @@ class colorSpaces():
                     try:
                         self.validityMap[0:256, x, newbounds[i]:newbounds[i + 1]] = 1
                     except:
-                        print 'ERROR!', len(newbounds), i, x
+                        print 'ERROR! in colorspace.createValidityMap', len(newbounds), i, x, newbounds
+                        quit()
             if push:
                 b = time.time()
                 print 'time to create simple validitymap', 1000*(b-a)
@@ -914,6 +915,10 @@ class colorSpaces():
             self.sectorFromMip(hSpan)
         self.createValidityMap()
 
+    def displayError(self, str):
+        error = QtGui.QMessageBox()
+        error.setText(QtCore.QString(str))
+        error.exec_()
 
 
 

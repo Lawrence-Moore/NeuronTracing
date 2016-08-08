@@ -87,7 +87,6 @@ class Run(QtGui.QMainWindow):
         self.remakeLayout(width, height)
 
     def changeGPUMode(self, mode):
-        print mode
         if self.gpuAvailable:
             modes = [self.gpuMode, self.colorSpace.gpuMode, self.mipViews.gpuMode]
             if mode == 2:  # is checked
@@ -441,6 +440,7 @@ class Run(QtGui.QMainWindow):
         st += '\narea mode: ' + self.colorSpace.areaMode
         st += '\nindexes: area, ' + str(self.colorSpace.indexArea)
         st += '. volume, ' + str(self.colorSpace.indexVolume)
+        st += '\nmanual selected: ' + str(self.colorSpace.manualSelected)
         self.ui.debugLabel.setText(QtCore.QString(st))
 
 if __name__ == '__main__':
@@ -523,13 +523,18 @@ if __name__ == '__main__':
 # threshold field for som and k-means in masker gui
 # alignment wiggle and threshold fields in correctionwin gui
 
-# disclaimer: does not do convex on y-axis for multiple-areas (closes folds first)
+# commented correctionwin, plotspace
+
+# IMPLEMENT GPU SPLITTING IN COLOR_CHOOSER?
+
+# disclaimer: does not do concave on y-axis for multiple-areas (closes folds first)
 # to fix: gpu clustering on images > 1.2 GB in size (as a function of GPU mem?)
 # debug: pictures in icons displaying in windows
 # combine both CorrectionWin and masker GUIs into one gui
 # add preference pane
 # for zoom/pan, scroll into/out of the mouse position
 # zoom/edit image in CorrectionWin
+# comment code, package to exe
 
 # time-performance log:
 # 6/24: 2D Simple with 200^2 pixels: (MappedMip: 470ms), (Updating: 35ms)

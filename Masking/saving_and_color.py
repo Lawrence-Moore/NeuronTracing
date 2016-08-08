@@ -358,6 +358,13 @@ def rgbCorrection(img, bounds, gpuMode, include, both=False):  # both refers to 
 
 
 def rgb2xyv(rgb, radius, colorMode, only='Python'):
+    '''
+    :param rgb: 8bit
+    :param radius:
+    :param colorMode:
+    :param only:
+    :return:
+    '''
     hsv = cv2.cvtColor(rgb, cv2.COLOR_RGB2HSV_FULL)
     # hsv = [0-255, 0-255, 0-255]
     h, s, v = hsv[:, :, 0], hsv[:, :, 1], hsv[:, :, 2]
@@ -383,10 +390,14 @@ def rgb2xyv(rgb, radius, colorMode, only='Python'):
         return xyv
     return xyv, xyvNumpy
 
-
 def xyv2rgb(xyv, radius, colorMode):
-    # note: will accept python list of three numpy x, y, v arrays as separate channels
-    # or will accept xyv as a single numpy array. always returns an 8-bit rgb image
+    '''
+    :param xyv: either a python list of three numpy x, y, v arrays as separate
+    channels or a single numpy array representing an image in xyv format
+    :param radius: int: defines the radius of colorspaceview
+    :param colorMode: whether xyvLst is represents hsv or hsvI colorspace
+    :return: rgb: 8uint numpy array: xyv image converted to rgb format
+    '''
     if type(xyv) is list:
         x, y, v = xyv
     else:
@@ -413,8 +424,13 @@ def xyv2rgb(xyv, radius, colorMode):
     rgb = rgb.astype(np.uint8)
     return rgb
 
-
 def xyvLst2rgb(xyvLst, radius, colorMode):
+    '''
+    :param xyvLst: list of [x, y, v] colors
+    :param radius: int: defines the radius of colorspaceview
+    :param colorMode: whether xyvLst is represents hsv or hsvI colorspace
+    :return: rgbLst: lst of [r, g, b] color from [0-256]
+    '''
     rgbLst = []
     for [x, y, v] in xyvLst:
         x, y = float(x), float(y)
@@ -439,7 +455,6 @@ def xyvLst2rgb(xyvLst, radius, colorMode):
         rgbLst.append(list(rgb))
     return rgbLst
 
-
 def hsvtoxyv(hsv, radius):
     '''
     :param hsv: list of 3 ints: hsv color, h:[0, 2pi], s:[0, 1], v:[0, 255]
@@ -458,7 +473,6 @@ def hsvtoxyv(hsv, radius):
     if y == radius * 2:
         y -= 1
     return [x, y, v]
-
 
 def rgbtohsv(rgb):
     '''
@@ -502,7 +516,6 @@ def rgbtohsv8bit(rgb):
         h = 42.5 * (((r - g) / delta) + 4)
     return [int(h), int(s), int(v)]
 
-
 def hsv2rgb(hsv):
     '''
     :param hsv: list of 3 ints: hsv color, h:[0, 2pi], s:[0, 1], v:[0, 255]
@@ -530,3 +543,14 @@ def hsv2rgb(hsv):
     else:
         (r, g, b) = (v, x, y)
     return (int(r * 255), int(g * 255), int(b * 255))
+
+def getRGBMap(after, before):
+    rgbMap = np.zeros((256, 256, 256), dtype=bool)
+    width, height = after.shape[1], after.shape[0]
+    for y in xrange(0, height):
+        for x in xrange(0, width):
+            if after[y, x].any() != 0:
+                [r, g, b] = before[y, x]
+                rgbMap[r, g, b] = True
+    return rgbMap
+    # this will return a RGB validityMap
