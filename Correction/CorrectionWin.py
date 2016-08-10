@@ -152,12 +152,16 @@ class Correction(QtGui.QMainWindow):
         (normalized and optionally aligned) as full resolution, 16uint TIFs
         '''
         # get directory in which to create stackTIFs directory and save
-        dialog = QtGui.QFileDialog()
-        opendirectory = str(dialog.getExistingDirectory())
-        if not opendirectory:  # no directory was chosen
-            return
+        # dialog = QtGui.QFileDialog()
+        # opendirectory = str(dialog.getExistingDirectory())
+        # if not opendirectory:  # no directory was chosen
+        #    return
         # create subdirectory for saving TIFs
-        savedirectory = opendirectory + '/stackTIFs'
+        # delete this!:        
+        savedirectory = self.filename[:-4]  # get folder name from self.filename
+        if not os.path.exists(savedirectory):
+            os.makedirs(savedirectory)
+        savedirectory += '/stackTIFs'
         if not os.path.exists(savedirectory):
             os.makedirs(savedirectory)
         if self.ui.thresholdMode.isChecked():
@@ -167,12 +171,12 @@ class Correction(QtGui.QMainWindow):
             thresh = 0
             threshName = 'noThreshold'
         if self.alignMode:  # view is unaligned, get from self.unalignedData
-            for i, zLayerImg in enumerate(self.unalignedData[thresh]):
-                filename = savedirectory + ('/unaligned_%s_layer%d.tif' % (threshName, i))
+            for i, zLayerImg in enumerate(self.unalignedData[thresh]):  # revert back
+                filename = savedirectory + ('/unaligned_%s z_%d.tif' % (threshName, i))
                 tifffile.imsave(filename, zLayerImg)
         else:  # view is aligned, get from self.alignedData
             for i, zLayerImg in enumerate(self.alignedData[thresh]):
-                filename = savedirectory + ('/aligned_%s_layer%d.tif' % (threshName, i))
+                filename = savedirectory + ('/aligned_%s z_%d.tif' % (threshName, i))
                 tifffile.imsave(filename, zLayerImg)
 
     def saveMIP(self):

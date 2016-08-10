@@ -150,6 +150,9 @@ class Run(QtGui.QMainWindow):
 
         # neurons list is xyv
         neuronsList = copy.copy(self.mipViews.selectedNeurons)
+        if len(neuronsList) == 0:
+            print 'Error! No neurons were selected. aborting...'
+            return
         colormode = self.colorMode
         radius = self.colorSpace.side / 2
         # k_means(self.mipViews.originalImage, neuronsList, n_colors=len(neuronsList))
@@ -524,11 +527,10 @@ if __name__ == '__main__':
 # alignment wiggle and threshold fields in correctionwin gui
 
 # commented correctionwin, plotspace
+# implemented gpu splitting for limited memory capacity in color_chooser
 
-# IMPLEMENT GPU SPLITTING IN COLOR_CHOOSER?
 
 # disclaimer: does not do concave on y-axis for multiple-areas (closes folds first)
-# to fix: gpu clustering on images > 1.2 GB in size (as a function of GPU mem?)
 # debug: pictures in icons displaying in windows
 # combine both CorrectionWin and masker GUIs into one gui
 # add preference pane

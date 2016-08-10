@@ -13,6 +13,7 @@ import color_chooser
 
 
 def applyToStack(maps, size, opendirectory, boundsinclude, colorMode, gpuMode, grayScale=False):
+    print 'applying to stack in gpu mode', gpuMode
     if colorMode == 'rgbClusters':
         [merges, maps, full] = maps
     # initiate a progress bar

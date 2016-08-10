@@ -224,7 +224,7 @@ def match_patch(images, patch_index, patch, width, image_index, color_index, wig
 
     # go through and find the greatest similarity in the layers
     # check for the range
-    offset = 20
+    offset = wiggle_room
     min_shift = -1 * min(offset, image_index)
     max_shift = min(offset + image_index, len(images)) - image_index
     for z_offset in range(min_shift, max_shift):

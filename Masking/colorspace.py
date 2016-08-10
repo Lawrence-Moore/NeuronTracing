@@ -770,6 +770,7 @@ class colorSpaces():
         if oneAreaMode:
             dict = self.numpyAreas2Dict(self.areas[0], concave=True)
             minx, maxx = dict['i'], dict['f']
+            newbounds = []
             for x in xrange(minx, (maxx + 1)):
                 try:
                     bounds = dict[x]
@@ -885,17 +886,6 @@ class colorSpaces():
                                 self.saveGray.isChecked())
         else:
             return maps
-
-    def getOriginalColorSpace(self, after, before):
-        rgbMap = np.zeros((256, 256, 256), dtype=bool)
-        width, height = after.shape[1], after.shape[0]
-        for y in xrange(0, height):
-            for x in xrange(0, width):
-                if after[y, x].any() != 0:
-                    [r, g, b] = before[y, x]
-                    rgbMap[r, g, b] = True
-        return rgbMap
-        # this will return an RGB validityMap
 
     def rgbClusters2Chooser(self, mipImage, boundsInclude, rgbList, prefs, dir):
         # this only works in 'hsv' mode right now
