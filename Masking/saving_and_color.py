@@ -12,7 +12,8 @@ import arrayfire as af
 import color_chooser
 
 
-def applyToStack(maps, size, opendirectory, boundsinclude, colorMode, gpuMode):
+def applyToStack(maps, size, opendirectory, boundsinclude, colorMode, gpuMode, grayScale=False):
+    print 'applying to stack in gpu mode', gpuMode
     if colorMode == 'rgbClusters':
         [merges, maps, full] = maps
     # initiate a progress bar
@@ -119,10 +120,11 @@ def applyToStack(maps, size, opendirectory, boundsinclude, colorMode, gpuMode):
                                 indices.append((yshift + px))
                     cropped[indices] = black  # set pixels to black
                     cropped = cropped.reshape(height, width, numcolors)  # reshape back to normal
-            # save the array as tif
-            tifffile.imsave((saveUndilatedDir + ('Color%d/' % (color+1)) + file), cropped)
             # save the numpy array into numpystack
             numpystacks[color].append(cropped.copy())
+            # save the array as tif
+            cropped = makeGrayScale(cropped, grayScale)
+            tifffile.imsave((saveUndilatedDir + ('Color%d/' % (color+1)) + file), cropped)
             # update progressbar
             progress += 1
             bar.setValue(progress)
@@ -132,8 +134,9 @@ def applyToStack(maps, size, opendirectory, boundsinclude, colorMode, gpuMode):
         bar.setWindowTitle(QtCore.QString('Creating MIP for Color %d' % (color+1)))
         QtGui.QApplication.processEvents()
         mip = np.maximum.reduce(numpystacks[color])
+        mip = makeGrayScale(mip, grayScale)
         tifffile.imsave((saveUndilatedDir + ('MIP_Undilated_Color%d' % (color+1)) + '.tif'), mip)
-        progress += 1
+        progress += mipProgress
         bar.setValue(progress)
         QtGui.QApplication.processEvents()
     dim3bools = []
@@ -163,13 +166,29 @@ def applyToStack(maps, size, opendirectory, boundsinclude, colorMode, gpuMode):
             # dilatedImage = median_filter(dilatedImage, size=(3, 3, 1))  # this is in beta
             # dilatedImage = cv2.bitwise_and(originalStack[layer], originalStack[layer], mask=dilated3DMask[layer])  # dilated3DMask[layer] * originalStack[layer]
             dilatedStack.append(dilatedImage)
+            dilatedImage = makeGrayScale(dilatedImage, grayScale)
             tifffile.imsave((saveDilatedDir + ('Color%d/' % (color+1)) + file), dilatedImage)
         dilatedMip = np.maximum.reduce(dilatedStack)
         # print 'comparison of the 2 MIPs:', (dilatedMip==mip).all()
+        dilatedMip = makeGrayScale(dilatedMip, grayScale)
         tifffile.imsave((saveDilatedDir + ('MIP_Dilated_Color%d' % (color+1)) + '.tif'), dilatedMip)
-        progress += 3
+        progress += dilationProgress
         bar.setValue(progress)
         QtGui.QApplication.processEvents()
+
+def makeGrayScale(img, grayScale):
+    # works on 2D images only (8bit or 16bit)
+    if not grayScale:
+        return img
+    full16 = False
+    if img.dtype == np.uint16:
+        full16 = True
+    img = np.mean(img, axis=2)
+    if full16:
+        img = img.astype(np.uint16)
+    else:
+        img = img.astype(np.uint8)
+    return img
 
 def merged2Originals(rgb, rgbList, merges):
     if type(rgb[0]) is list:
@@ -196,7 +215,7 @@ def merged2Originals(rgb, rgbList, merges):
         return newstack
     return search(stack)
 
-def getStack(full16Bit=False, withDir=False):
+def getStack(boundsinclude, full16Bit=False, withDir=False):
     dialog = QtGui.QFileDialog()
     opendirectory = str(dialog.getExistingDirectory())
     if opendirectory == '':
@@ -210,11 +229,28 @@ def getStack(full16Bit=False, withDir=False):
             original = tif.asarray()
         if original.shape[2] == 4:
             original = original[:, :, 0:3]
-        if not full16Bit and original.dtype == np.uint16:
-            original /= 256
-            original = original.astype(np.uint8)
-        elif original.dtype == np.uint8:
-            print 'Warning! Expected 16-bit images. Continuing with 8-bit images...'
+        if boundsinclude != [[[0, 127, 255], [0, 127, 255], [0, 127, 255]], [True, True, True]]:
+            print 'undergoing image correction'
+            [bounds, include] = boundsinclude
+            if original.dtype == np.uint8:
+                original = original.astype(np.float32)
+                original *= 256
+            else:
+                original = original.astype(np.float32)
+            eightbit, fullbit = rgbCorrection(original, bounds, False, include,
+                                          both=True)
+            if full16Bit:
+               original = fullbit
+            else:
+                original = eightbit
+        else:
+            if original.dtype == np.uint8 and full16Bit:
+                print 'Warning! Expected 16-bit images. Continuing by converting to 16bit...'
+                original = original.astype(np.uint16)
+                original *= 256
+            elif original.dtype == np.uint16 and not full16Bit:
+                original /= 256
+                original = original.astype(np.uint8)
         layers.append(original)
     if withDir:
         return layers, opendirectory
@@ -323,6 +359,13 @@ def rgbCorrection(img, bounds, gpuMode, include, both=False):  # both refers to 
 
 
 def rgb2xyv(rgb, radius, colorMode, only='Python'):
+    '''
+    :param rgb: 8bit
+    :param radius:
+    :param colorMode:
+    :param only:
+    :return:
+    '''
     hsv = cv2.cvtColor(rgb, cv2.COLOR_RGB2HSV_FULL)
     # hsv = [0-255, 0-255, 0-255]
     h, s, v = hsv[:, :, 0], hsv[:, :, 1], hsv[:, :, 2]
@@ -348,10 +391,14 @@ def rgb2xyv(rgb, radius, colorMode, only='Python'):
         return xyv
     return xyv, xyvNumpy
 
-
 def xyv2rgb(xyv, radius, colorMode):
-    # note: will accept python list of three numpy x, y, v arrays as separate channels
-    # or will accept xyv as a single numpy array. always returns an 8-bit rgb image
+    '''
+    :param xyv: either a python list of three numpy x, y, v arrays as separate
+    channels or a single numpy array representing an image in xyv format
+    :param radius: int: defines the radius of colorspaceview
+    :param colorMode: whether xyvLst is represents hsv or hsvI colorspace
+    :return: rgb: 8uint numpy array: xyv image converted to rgb format
+    '''
     if type(xyv) is list:
         x, y, v = xyv
     else:
@@ -378,8 +425,13 @@ def xyv2rgb(xyv, radius, colorMode):
     rgb = rgb.astype(np.uint8)
     return rgb
 
-
 def xyvLst2rgb(xyvLst, radius, colorMode):
+    '''
+    :param xyvLst: list of [x, y, v] colors
+    :param radius: int: defines the radius of colorspaceview
+    :param colorMode: whether xyvLst is represents hsv or hsvI colorspace
+    :return: rgbLst: lst of [r, g, b] color from [0-256]
+    '''
     rgbLst = []
     for [x, y, v] in xyvLst:
         x, y = float(x), float(y)
@@ -404,7 +456,6 @@ def xyvLst2rgb(xyvLst, radius, colorMode):
         rgbLst.append(list(rgb))
     return rgbLst
 
-
 def hsvtoxyv(hsv, radius):
     '''
     :param hsv: list of 3 ints: hsv color, h:[0, 2pi], s:[0, 1], v:[0, 255]
@@ -423,7 +474,6 @@ def hsvtoxyv(hsv, radius):
     if y == radius * 2:
         y -= 1
     return [x, y, v]
-
 
 def rgbtohsv(rgb):
     '''
@@ -467,7 +517,6 @@ def rgbtohsv8bit(rgb):
         h = 42.5 * (((r - g) / delta) + 4)
     return [int(h), int(s), int(v)]
 
-
 def hsv2rgb(hsv):
     '''
     :param hsv: list of 3 ints: hsv color, h:[0, 2pi], s:[0, 1], v:[0, 255]
@@ -495,3 +544,14 @@ def hsv2rgb(hsv):
     else:
         (r, g, b) = (v, x, y)
     return (int(r * 255), int(g * 255), int(b * 255))
+
+def getRGBMap(after, before):
+    rgbMap = np.zeros((256, 256, 256), dtype=bool)
+    width, height = after.shape[1], after.shape[0]
+    for y in xrange(0, height):
+        for x in xrange(0, width):
+            if after[y, x].any() != 0:
+                [r, g, b] = before[y, x]
+                rgbMap[r, g, b] = True
+    return rgbMap
+    # this will return a RGB validityMap

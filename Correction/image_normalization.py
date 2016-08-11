@@ -51,14 +51,16 @@ def normalize_colors(images, threshold_std=False, std_multiple=0):
 
     # go through the images and calculate the mean and standard deviation of each
     normalized_layers = []
-    for image, mask in zip(images, masks):
-        # iterate through the color layers
-        image = image.copy()
-        layers = []
-        if threshold_std:
+    if threshold_std:
+        for image, mask in zip(images, masks):
+            image = image.copy()
             image[mask] = (((image[mask] - np.mean(image[mask])) / np.std(image[mask])) * std) + mean
             normalized_layers.append(image)
-        else:
+    else:
+        for image in images:
+            # iterate through the color layers
+            image = image.copy()
+            layers = []
             for layer_index in [0, 1, 2]:
                 layer = image[:, :, layer_index].copy()
 
@@ -225,7 +227,7 @@ def match_patch(images, patch_index, patch, width, image_index, color_index, wig
 
     # go through and find the greatest similarity in the layers
     # check for the range
-    offset = 20
+    offset = wiggle_room
     min_shift = -1 * min(offset, image_index)
     max_shift = min(offset + image_index, len(images)) - image_index
     for z_offset in range(min_shift, max_shift):
@@ -466,8 +468,8 @@ def k_means(image=None, images=None, weights=None, n_colors=64, num_training=100
     return centers
 
 
-def self_organizing_map(image=None, images=None, weights=None, n_colors=64, dim=None,
-                        num_training=1000, std_multiple=0, threshold=False, show_plot=False):
+def self_organizing_map(image=None, images=None, weights=None, weights_max_value=1, n_colors=64,
+                        dim=None, num_training=1000, std_multiple=0, threshold=False, show_plot=False):
     """
     Cluster an image using a self organizing map
     """
@@ -476,6 +478,9 @@ def self_organizing_map(image=None, images=None, weights=None, n_colors=64, dim=
     if dim is None and weights is not None:
         # figure out a way to spread out the nodes of the som
         # find the factor closest to the square root
+            # normalize weights
+        weights = (np.array(weights) / weights_max_value).tolist()
+
         factor = get_factor_closest_to_sqrt(len(weights))
 
         # it's prime if the factor is 1
@@ -486,6 +491,7 @@ def self_organizing_map(image=None, images=None, weights=None, n_colors=64, dim=
         factor = get_factor_closest_to_sqrt(len(weights))
         dim = (factor, len(weights) / factor)
         weights = np.reshape(weights, (dim[0], dim[1], 3))
+
     else:
         if n_colors == 2 or n_colors == 3:
             dim = (1, n_colors)

@@ -27,13 +27,13 @@ class Correction(QtGui.QMainWindow):
         self.ui.afterView.viewport().installEventFilter(self)
         self.ui.afterView.viewport().setMouseTracking(True)
         # set the alignment square effectively to nil
-        self.selectedRect = [0, 0, 0, 0]
+        self.selectedRect = [0, 0, 0, 0]  # [xi, yi, xf, yf]
         self.mouseHold = False  # whether mouse is currently pressed/held
         self.ui.importButton.released.connect(self.importImage)
         self.indexLayer = 0  # initial layer displayed is 0th index
         self.ui.layerSlider.setTickPosition(self.indexLayer)
         self.filename = ''  # effectively nil/false in value
-        # create QPen (color and appearance) for drawing on afterView
+        # create QPen (color and appearance) for drawing rectangle in afterView
         self.pen = QtGui.QPen()
         self.pen.setColor(QtGui.QColor(255, 255, 255))
         # connect threshold checkbox, slider, and align widgets to methods
@@ -44,24 +44,84 @@ class Correction(QtGui.QMainWindow):
         self.ui.alignButton.setVisible(False)
         self.ui.channelSelectMenu.setVisible(False)
         self.ui.layerLabel.setText(QtCore.QString('Layer: %d' % self.indexLayer))
-        # self.normalizedData, self.thresholdedData = numpy arrays after
-        # normalizing w/o and w/ threshold
         # self.side = side length of alignment square in pixels
         # self.fullWidth, self.fullHeight = dimensions of original images
-        # self.unalignedImages = [[Original[z-Layers:QImages], Normal[z-Layers]colorLayers:QImages], Thresholded[z-Layers][colorLayers:QImages]]
+        # self.unalignedImages = [[Original[z-Layers:QImages],
+        # Normal[z-Layers]colorLayers:QImages], Thresholded[z-Layers][colorLayers:QImages]]
         # self.alignedImages = [Normal[z-Layers:QImages], Thresholded[z-Layers:QImages]
         # self.unalignedData = [Normal[z-Layers:NumpyArrs], Thresholded[z-Layers:NumpyArrs]]
-        # self.alignedData = [Normal[z-Layers:NumpyArrs]] #, Thresholded[z-Layers:NumpyArrs]]
+        # self.alignedData = [Normal[z-Layers:NumpyArrs] , Thresholded[z-Layers:NumpyArrs]]
+        # connect widgets to actions and set initial visibility
         self.ui.channelSelectMenu.currentIndexChanged.connect(self.channelSelectionChanged)
         self.ui.saveButton.released.connect(self.saveImage)
         self.ui.saveButton.setVisible(False)
         self.ui.saveStackButton.released.connect(self.saveStack)
-        self.ui.saveButton.setVisible(False)
+        self.ui.saveStackButton.setVisible(False)
         self.ui.saveMIPButton.released.connect(self.saveMIP)
         self.ui.saveMIPButton.setVisible(False)
         self.ui.thresholdMode.setVisible(False)
+        self.ui.thresholdMenu.activated[str].connect(self.changeThreshold)
+        self.ui.thresholdMenu.setVisible(False)
+        self.ui.alignField.setVisible(False)
+
+    def changeThreshold(self, i):
+        '''
+        :param i: str: new thresholding value from self.ui.thresholdMenu
+        :return: none: renormalizes original imported file with new threshold
+        value and changes self's unaligned Data and Images, as well as aligned
+        if necessary.
+        '''
+        # read in original data from imported czi
+        originalData, thresholdVal = read_czi_file(self.filename), int(i)
+        # initiate a progress bar
+        bar = QtGui.QProgressBar()
+        bar.setWindowTitle(QtCore.QString('Applying new threshold of ' + i))
+        bar.setWindowModality(QtCore.Qt.WindowModal)
+        bar.resize((self.ui.beforeView.width()), (self.ui.beforeView.width() / 20))
+        bar.move(self.ui.beforeView.width(), self.ui.beforeView.width())
+        currentProgress = 0
+        bar.setMaximum((len(originalData) * 2))
+        bar.show()
+        QtGui.QApplication.processEvents()
+        # execute new threshold
+        thresholdedData = normalize_with_standard_deviation(originalData, thresholdVal)
+        # update progress bar
+        currentProgress += len(originalData)
+        bar.setValue(currentProgress)
+        QtGui.QApplication.processEvents()
+        # save new thresholded data
+        self.unalignedData[1] = thresholdedData
+        # creates image from new thresholded data and save into self
+        thresholdedImages = []
+        for data in thresholdedData:  # for all layers after thresholding
+            data = data / 256
+            data = data.astype(np.uint8)  # convert to 8-bit for images
+            colorData = [data]
+            colorData += self.splitChannels(data)
+            colorImages = []
+            # make list of thresholded images at this layer by color channel
+            for datum in colorData:
+                img = Image.fromarray(datum)
+                img = ImageQt.ImageQt(img)
+                colorImages.append(img)
+            thresholdedImages.append(colorImages)
+            # update progress bar
+            currentProgress += 1
+            bar.setValue(currentProgress)
+            QtGui.QApplication.processEvents()
+        self.unalignedImages[2] = thresholdedImages
+        bar.close()
+        if not self.alignMode:  # realign if images currently are
+            self.alignMode = True
+            self.alignImages()  # updates of afterView
+        else:
+            self.drawAfterView()  # else, force update of afterView
 
     def saveImage(self):
+        '''
+        :return: none: saves image currently displayed in afterView with full
+        resolution and with 16uint, if it is not a single color channel.
+        '''
         # get the filename from the save dialog
         dialog = QtGui.QFileDialog()
         filename = str(dialog.getSaveFileName(filter=QtCore.QString('Images (*.tif)')))
@@ -76,8 +136,8 @@ class Correction(QtGui.QMainWindow):
             channel = self.ui.channelSelectMenu.currentIndex()
             if channel == 0:
                 img = self.unalignedData[thresh][self.indexLayer]
-            else:
-                qimagemode = True
+            else:  # saving an single color channel
+                qimagemode = True  # use 8uint image, not 16uint numpy
                 img = self.unalignedImages[(thresh + 1)][self.indexLayer][channel]
         else:  # view is aligned, get from self.alignedData
             img = self.alignedData[thresh][self.indexLayer]
@@ -87,11 +147,21 @@ class Correction(QtGui.QMainWindow):
             tifffile.imsave(filename, img)
 
     def saveStack(self):
-        dialog = QtGui.QFileDialog()
-        opendirectory = str(dialog.getExistingDirectory())
-        if not opendirectory:  # no directory was chosen
-            return
-        savedirectory = opendirectory + '/stackTIFs'
+        '''
+        :return: none: saves the stack of images shown in afterView
+        (normalized and optionally aligned) as full resolution, 16uint TIFs
+        '''
+        # get directory in which to create stackTIFs directory and save
+        # dialog = QtGui.QFileDialog()
+        # opendirectory = str(dialog.getExistingDirectory())
+        # if not opendirectory:  # no directory was chosen
+        #    return
+        # create subdirectory for saving TIFs
+        # delete this!:        
+        savedirectory = self.filename[:-4]  # get folder name from self.filename
+        if not os.path.exists(savedirectory):
+            os.makedirs(savedirectory)
+        savedirectory += '/stackTIFs'
         if not os.path.exists(savedirectory):
             os.makedirs(savedirectory)
         if self.ui.thresholdMode.isChecked():
@@ -100,17 +170,19 @@ class Correction(QtGui.QMainWindow):
         else:
             thresh = 0
             threshName = 'noThreshold'
-        if self.alignMode:  # view is unaligned, get from self.unalignedImages
-            for i, zLayer in enumerate(self.unalignedData[thresh]):
-                filename = savedirectory + ('/unaligned_%s_layer%d.tif' % (threshName, i))
-                zLayerImg = zLayer[0]
+        if self.alignMode:  # view is unaligned, get from self.unalignedData
+            for i, zLayerImg in enumerate(self.unalignedData[thresh]):  # revert back
+                filename = savedirectory + ('/unaligned_%s z_%d.tif' % (threshName, i))
                 tifffile.imsave(filename, zLayerImg)
-        else:  # view is aligned, get from self.alignedImages
+        else:  # view is aligned, get from self.alignedData
             for i, zLayerImg in enumerate(self.alignedData[thresh]):
-                filename = savedirectory + ('/aligned_%s_layer%d.tif' % (threshName, i))
+                filename = savedirectory + ('/aligned_%s z_%d.tif' % (threshName, i))
                 tifffile.imsave(filename, zLayerImg)
 
     def saveMIP(self):
+        '''
+        :return: none: saves a mip of the stack of images shown in afterView
+        '''
         dialog = QtGui.QFileDialog()
         filename = str(dialog.getSaveFileName(filter=QtCore.QString('Images (*.tif)')))
         if not filename:  # no filename was created
@@ -128,11 +200,10 @@ class Correction(QtGui.QMainWindow):
 
     def splitChannels(self, arr):
         '''
-        :param array: numpy array: an image w/shape: (width, height, 3)
-        :param channel: int (0-2): a color channel (r, g, or b)
-        :return: the array param isolated to the color channel param
+        :param arr: numpy array: an image w/shape: (width, height, 3)
+        :return: numpy array: param arr isolated into (r, g, b) color channels
         '''
-        maskedArrays = []
+        separatedColors = []
         for channel in xrange(0, 3):  # for R, G, and B channels
              # set other two channels to same value
             newarr = arr.copy()
@@ -140,43 +211,46 @@ class Correction(QtGui.QMainWindow):
             newarr[:, :, extraChannel] = newarr[:, :, channel]
             extraChannel = (channel + 2) % 3
             newarr[:, :, extraChannel] = newarr[:, :, channel]
-            maskedArrays.append(newarr)
-        return maskedArrays  # list of arrays where R, G, B take precedence
+            separatedColors.append(newarr)
+        return separatedColors  # list of arrays where R, G, B take precedence
 
     def channelSelectionChanged(self):
-        if self.ui.channelSelectMenu.currentIndex() == 0 and self.alignedImages:
-            self.alignMode = False
+        '''
+        :return: none: changes the current color channel in afterView
+        '''
+        if self.ui.channelSelectMenu.currentIndex() == 0:
+            self.ui.alignField.setVisible(False)
             self.ui.alignButton.setVisible(False)
         else:
             self.ui.alignButton.setVisible(True)
-            if not self.alignedImages:
-                self.alignMode = True
-            else:
-                self.alignMode = False
+            self.ui.alignField.setVisible(True)
         self.drawAfterView()
 
     def alignImages(self):
-        if not self.filename:  # nothing was imported
-            return
+        '''
+        :return: none: aligns the normalized data with the info from self's
+        selectedRect (selected area), channelSelectMenu (color channel), and
+        alignField (wiggle room).
+        '''
+        if not self.filename or self.selectedRect == [0, 0, 0, 0]:
+            return  # nothing was imported or no area was selected
         if self.alignMode:  # ready to be aligned
             # push new labels
-            self.ui.thresholdMode.setChecked(False)
-            self.ui.thresholdMode.setVisible(False)
-            self.ui.afterLabel.setText(QtCore.QString('After Normalizing and Aligning'))
-            self.ui.alignButton.setText(QtCore.QString('Unalign'))
+            self.ui.alignField.setVisible(False)
             self.alignMode = False
+            print 'unaligned...ready for alignment'
             self.ui.channelSelectMenu.setVisible(False)
             QtGui.QApplication.processEvents()
-            '''# initiate a progress bar
+            # initiate a progress bar
             bar = QtGui.QProgressBar()
             bar.setWindowTitle(QtCore.QString('Aligning Images'))
             bar.setWindowModality(QtCore.Qt.WindowModal)
             bar.resize((self.ui.beforeView.width()), (self.ui.beforeView.width() / 20))
             bar.move(self.ui.beforeView.width(), self.ui.beforeView.width())
-            bar.setMaximum(2)
+            bar.setMaximum(4)
             bar.show()
-            QtGui.QApplication.processEvents()'''
-            # finish initiating progress bar
+            QtGui.QApplication.processEvents()
+            # create params to pass into align_images function
             self.alignedImages = []
             self.alignedData = []
             # x and y are intuitively switched in align_images()
@@ -184,43 +258,79 @@ class Correction(QtGui.QMainWindow):
             y = int(float(self.fullWidth) / (self.ui.afterView.width()) * self.selectedRect[0])
             width = int(float(self.fullWidth) / (self.ui.afterView.width()) * self.side)
             colorlayer = self.ui.channelSelectMenu.currentIndex() - 1
-            print x, y, width, colorlayer, self.indexLayer  # my args
-            # make normal aligned images
-            normalAligned = align_images(self.unalignedData[0], True, x, y, width, colorlayer, self.indexLayer)
+            # get wiggle parameter
+            try:
+                wiggle = int(self.ui.alignField.text())
+            except:
+                wiggle = 5  # defualt wiggle, to be changed in **************** PREFERENCES
+                self.ui.alignField.setText(QtCore.QString(str(5)))
+            minWiggle, maxWiggle = 2, (self.selectedRect[2] - self.selectedRect[0]) / 2
+            if wiggle < minWiggle:
+                print 'wiggle was upgraded to min value of ', minWiggle  # **** Express this w/QDialog?
+                wiggle = minWiggle
+                self.ui.alignField.setText(QtCore.QString(str(minWiggle)))
+            elif wiggle > maxWiggle:
+                print 'wiggle was downgraded to max value of ', maxWiggle
+                wiggle = maxWiggle
+                self.ui.alignField.setText(QtCore.QString(str(maxWiggle)))
+            if wiggle < 5:
+                print 'wiggle is too small. aborting...'
+                return
+            # params for align_images
+            print x, y, width, colorlayer, self.indexLayer, wiggle
+            # make un-thresholded aligned data
+            normalAligned = align_images(self.unalignedData[0], wiggle, True,
+                                x, y, width, colorlayer, self.indexLayer)
             self.alignedData.append(normalAligned)
             self.ui.layerSlider.setMaximum((len(normalAligned) - 1))
-            '''bar.setWindowTitle(QtCore.QString('Caching Aligned Images'))
+            # update progress bar
+            bar.setWindowTitle(QtCore.QString('Caching Aligned Images'))
             bar.setValue(1)
-            QtGui.QApplication.processEvents()'''
+            QtGui.QApplication.processEvents()
+            # convert un-thresholded aligned data to images
             normalAImages = []
             for datum in normalAligned:
                 normalAImages.append(self.array16ToQImage(datum))
             self.alignedImages.append(normalAImages)
-            '''bar.setWindowTitle(QtCore.QString('Aligning Images with Threshold'))
+            # update progress bar
+            bar.setWindowTitle(QtCore.QString('Aligning Images with Threshold'))
             bar.setValue(2)
             QtGui.QApplication.processEvents()
-            # make thresholded aligned images
-            thresholdedAligned = align_images(self.unalignedData[1], True, x, y, width, colorlayer, self.indexLayer)
+            # make thresholded aligned data
+            thresholdedAligned = align_images(self.unalignedData[1], wiggle, True, x,
+                y, width, colorlayer, self.indexLayer)
             self.alignedData.append(thresholdedAligned)
+            # update progress bar
             bar.setWindowTitle(QtCore.QString('Caching Aligned Images with Threshold'))
             bar.setValue(3)
             QtGui.QApplication.processEvents()
+            # convert thresholded aligned data to images
             threshAImages = []
             for datum in thresholdedAligned:
                 threshAImages.append(self.array16ToQImage(datum))
-            self.alignedImages.append(threshAImages)'''
-            # push view
+            self.alignedImages.append(threshAImages)
+            # update afterView, labels, and buttons
             self.drawAfterView()
-            '''bar.close()'''
+            self.ui.afterLabel.setText(QtCore.QString('After Normalizing and Aligning'))
+            self.ui.alignButton.setText(QtCore.QString('Unalign'))
+            bar.close()
         else:  # already aligned, so redraw unaligned images
-            self.alignedImages = []
+            self.alignedImages = []  # removed aligned data
+            # update view, buttons, sliders, dropdowns, labels
             self.ui.layerSlider.setMaximum((len(self.unalignedData[0]) - 1))
             self.ui.alignButton.setText(QtCore.QString('Align'))
             self.alignMode = True
+            print 'was unaligned'
+            self.ui.alignField.setVisible(True)
             self.ui.channelSelectMenu.setVisible(True)
+            self.ui.channelSelectMenu.setCurrentIndex(0)
             self.drawAfterView()
 
     def array16ToQImage(self, datum):
+        '''
+        :param datum: 16uint numpy array of image
+        :return: img: 8bit qimage
+        '''
         datum = datum / 256
         datum = datum.astype(np.uint8)
         img = Image.fromarray(datum)
@@ -239,7 +349,7 @@ class Correction(QtGui.QMainWindow):
 
     def eraseRect(self):
         '''
-        :return: none: effectively the rectangle to nil and redraws afterView.
+        :return: none: changes drawn rectangle to nil and redraws afterView
         '''
         self.selectedRect = [0, 0, 0, 0]
         self.drawAfterView()
@@ -275,19 +385,15 @@ class Correction(QtGui.QMainWindow):
         if not self.filename:  # nothing was imported
             return
         # create scene from normalized image
-        width, height = self.ui.afterView.width(), self.ui.afterView.height()
+        width, height, thresh = self.ui.afterView.width(), self.ui.afterView.height(), 0
+        if self.ui.thresholdMode.isChecked():
+            thresh += 1
         if self.alignMode:
-            if self.ui.thresholdMode.isChecked():
-                img = self.unalignedImages[2][self.indexLayer][self.ui.channelSelectMenu.currentIndex()].scaled(width, height)
-            else:
-                img = self.unalignedImages[1][self.indexLayer][self.ui.channelSelectMenu.currentIndex()].scaled(width, height)
+            thresh += 1
+            channel = self.ui.channelSelectMenu.currentIndex()
+            img = self.unalignedImages[thresh][self.indexLayer][channel].scaled(width, height)
         else:
-            if self.ui.thresholdMode.isChecked():
-                print 'should never be here...'
-                img = self.alignedImages[1][self.indexLayer].scaled(width, height)
-            else:
-                print self.alignMode, self.indexLayer
-                img = self.alignedImages[0][self.indexLayer].scaled(width, height)
+            img = self.alignedImages[thresh][self.indexLayer].scaled(width, height)
         pixmap = QtGui.QPixmap.fromImage(img)
         pixitem = QtGui.QGraphicsPixmapItem(pixmap)
         scene = QtGui.QGraphicsScene()
@@ -356,15 +462,16 @@ class Correction(QtGui.QMainWindow):
             currentProgress += 4
             bar.setValue(currentProgress)
             QtGui.QApplication.processEvents()
-        self.unalignedImages.append(originalLayers)
+        self.unalignedImages.append(originalLayers) # unalignedImages[0]
         self.drawBeforeView()  # push the original image to beforeView
         bar.setWindowTitle(QtCore.QString('Importing File...Normalizing Original Data'))
         QtGui.QApplication.processEvents()
         # normalize original images without threshold and save as attribute
         normalizedData = normalize_generic(originalData)
-        self.unalignedData.append(normalizedData)
+        self.unalignedData.append(normalizedData)  # unalignedData[0]
         bar.setWindowTitle(QtCore.QString('Importing File...Caching Normalized Data (w/RGB splitting)'))
         QtGui.QApplication.processEvents()
+        # convert normalized data to images
         normalizedImages = []
         for data in normalizedData:  # for all layers after normalizing
             data = data / 256
@@ -382,12 +489,14 @@ class Correction(QtGui.QMainWindow):
                 QtGui.QApplication.processEvents()
             normalizedImages.append(colorImages)
             # update progress bar
-        self.unalignedImages.append(normalizedImages)
+        self.unalignedImages.append(normalizedImages)  # unalignedImages[1]
         # normalize original images with threshold and save as attribute
         bar.setWindowTitle(QtCore.QString('Importing File...Normalizing Original Data with Threshold'))
         QtGui.QApplication.processEvents()
-        thresholdedData = normalize_generic(originalData)
-        self.unalignedData.append(thresholdedData)
+        thresholdVal = self.ui.thresholdMenu.currentIndex() + 1
+        thresholdedData = normalize_with_standard_deviation(originalData, thresholdVal)
+        # convert normalized with threshold data to images
+        self.unalignedData.append(thresholdedData)  # unalignedData[1]
         bar.setWindowTitle(QtCore.QString('Importing File...Caching Normalized Data with Threshold (w/RGB splitting)'))
         QtGui.QApplication.processEvents()
         thresholdedImages = []
@@ -406,15 +515,17 @@ class Correction(QtGui.QMainWindow):
             currentProgress += 4
             bar.setValue(currentProgress)
             QtGui.QApplication.processEvents()
-        self.unalignedImages.append(thresholdedImages)
+        self.unalignedImages.append(thresholdedImages)  # unalignedImages[2]
         self.alignMode = True  # afterView is ready to draw rects with mouse
-        self.drawAfterView()  # push to processed images afterView
+        self.drawAfterView()  # push to normalized images afterView
+        # update labels, buttons, dropdowns
         self.ui.afterLabel.setText(QtCore.QString('After Normalizing'))
         self.ui.channelSelectMenu.setVisible(True)  # past normalizing, so ready to align
         self.ui.saveButton.setVisible(True)
         self.ui.saveStackButton.setVisible(True)
         self.ui.saveMIPButton.setVisible(True)
         self.ui.thresholdMode.setVisible(True)
+        self.ui.thresholdMenu.setVisible(True)
         # set number of layers in image to slide through with slider widget
         self.ui.layerSlider.setMaximum((len(originalData) - 1))
         self.ui.layerSlider.setTickPosition(0)
@@ -488,19 +599,23 @@ class Correction(QtGui.QMainWindow):
         self.ui.importButton.move(x, y)
         x += self.ui.importButton.width() + 30
         y += 10
-        self.ui.thresholdMode.move(x, y)
+        self.ui.thresholdMenu.move(x, y)
+        x += self.ui.thresholdMenu.width() + 5
+        self.ui.thresholdMode.move(x, y - 10)
         # adjust align and channelselect buttons
         x = width * .98 - self.ui.alignButton.width()
         self.ui.alignButton.move(x, y)
+        x -= 5 + self.ui.alignField.width()
+        self.ui.alignField.move(x, y + 5)
         x -= 5 + self.ui.channelSelectMenu.width()
         self.ui.channelSelectMenu.move(x, y)
         # adjust save buttons
         x = width * .98 - self.ui.saveStackButton.width()
         y = 2
         self.ui.saveStackButton.move(x, y)
-        x -= 5 + self.ui.saveStackButton.width()
+        x -= self.ui.saveMIPButton.width()
         self.ui.saveMIPButton.move(x, y)
-        x -= 5 + self.ui.saveMIPButton.width()
+        x -= self.ui.saveButton.width()
         self.ui.saveButton.move(x, y)
         # redraw views to scale
         self.drawBeforeView()

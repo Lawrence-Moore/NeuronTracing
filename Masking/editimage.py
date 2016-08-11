@@ -87,7 +87,6 @@ class EditWindow(QtGui.QMainWindow):
         self.activeSlider = 0  # min/mid/max
         self.mouseHold = False
         self.doneInitializing = True
-        print 'done init: editimage', self.bounds
 
     def checkChange(self):
         for c in xrange(0, 3):
