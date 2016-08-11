@@ -1,7 +1,6 @@
 import numpy as np
 from czifile import CziFile
 from PIL import Image
-import scipy
 from matplotlib import pyplot as plt
 from skimage.feature import match_template
 from sklearn.cluster import KMeans
@@ -9,6 +8,10 @@ from sklearn.utils import shuffle
 from skimage.measure import structural_similarity as ssim
 from math import sqrt
 from minisom import MiniSom
+import sys
+
+sys.path.append("../Masking")
+# from saving_and_color import xyv2rgb
 
 
 def normalize_with_standard_deviation(images, std_multiple):
@@ -428,6 +431,10 @@ def k_means(image=None, images=None, weights=None, n_colors=64, num_training=100
     else:
         kmeans = KMeans(n_clusters=n_colors, random_state=0).fit(image_array_sample)
 
+    centers = kmeans.cluster_centers_
+
+    visualize_color_space(image_array_sample, n_colors, kmeans=True)
+
     if show_plot:
         # Get labels for all points
         labels = kmeans.predict(image_array)
@@ -456,7 +463,7 @@ def k_means(image=None, images=None, weights=None, n_colors=64, num_training=100
         ax.set_title('After K-Means')
         plt.show()
 
-    return kmeans.cluster_centers_
+    return centers
 
 
 def self_organizing_map(image=None, images=None, weights=None, n_colors=64, dim=None,
@@ -495,13 +502,18 @@ def self_organizing_map(image=None, images=None, weights=None, n_colors=64, dim=
     # determine the dimensions
     som = MiniSom(dim[0], dim[1], 3, weights=weights, sigma=0.1, learning_rate=0.2)
     if weights is None:
-        som.random_weights_init(pixels)
+        if threshold:
+            som.random_weights_init(neuron_pixels)
+        else:
+            som.random_weights_init(pixels)
 
     if threshold:
         # get mostly bright pixels with a bit of background
         som.train_random(neuron_pixels, num_training)
+        sample_array = shuffle(neuron_pixels, random_state=0)[:num_training]
     else:
         som.train_random(pixels, num_training)
+        sample_array = shuffle(pixels, random_state=0)[:num_training]
 
     if show_plot:
         qnt = som.quantization(pixels)  # quantize each pixels of the image
@@ -522,11 +534,18 @@ def self_organizing_map(image=None, images=None, weights=None, n_colors=64, dim=
 
 
 def sample_data(image=None, images=None, std_multiple=0):
+    """
+    Samples the image or (images) passed in based on the standard deviation multiple passed in.
+    returns 4 objects: pixels belonging to neurons, pixels belonging to the background,
+        all the pixels of the image, and a scaled version of the original image.
+    The first three returns are numpy arrays of size [x, 3], where x is the number of pixels in each
+    The final return type is the same size as the original image, just sacled to 0 - 1.
+    """
     if image is None and images is None:
         raise ValueError('No images were passed in!')
     if image is not None:
         # works better with values between 0 and 1
-        image = np.array(image, dtype=np.float64) / (np.max(image))
+        image = np.array(image.copy(), dtype=np.float64) / (np.max(image))
 
         # reshape so it's 2-D
         w, h, d = tuple(image.shape)
@@ -542,8 +561,14 @@ def sample_data(image=None, images=None, std_multiple=0):
         for image in images:
             # works better with values between 0 and 1
             image = np.array(image, dtype=np.float64) / (np.max(image))
+
+            # segregate the image based on the intensity
             mask = find_non_background_pixels(image, std_multiple)
+
+            # split up into pixel and non pixel images
             neuron_pixels, non_neuron_pixels = image[mask], image[np.logical_not(mask)]
+
+            # sample some background pixels
             non_neuron_pixels = shuffle(non_neuron_pixels, random_state=0)[:int(.05 * neuron_pixels.shape[0])]  # keep only a small sample
             all_neuron_pixels = np.concatenate((all_neuron_pixels, neuron_pixels))
             sample_non_neuron_pixels = np.concatenate((sample_non_neuron_pixels, non_neuron_pixels))
@@ -571,6 +596,62 @@ def get_factor_closest_to_sqrt(number):
         factor -= 1
         isFactor = number % factor == 0
     return factor
+
+
+def visualize_color_space(data, n_clusters, kmeans=None, som=None):
+
+    if kmeans is not None:
+        kmeans = KMeans(n_clusters=n_clusters, random_state=0)
+        kmeans.fit(reduced_data)
+    else:
+        som = MiniSom(dim[0], dim[1], 2, sigma=0.1, learning_rate=0.2)
+        som.train_batch(reduced_data)
+
+    # Step size of the mesh. Decrease to increase the quality of the VQ.
+    step = .5     # point in the mesh [x_min, m_max]x[y_min, y_max].
+
+    # make the grid for HSV
+
+    # Plot the decision boundary. For that, we will assign a color to each
+    radius = 400
+    mid_v = 127
+    xx, yy = np.meshgrid(np.arange(0, radius, step), np.arange(0, radius, step))
+
+    xyv = np.reshape(np.c_[xx.ravel(), yy.ravel(), np.ones(xx.shape).ravel() * mid_v], (xx.shape[0], xx.shape[1], 3)).astype(np.uint8)
+
+    rgb_color_values = xyv2rgb(xyv, radius, 'hsv')
+
+    # Obtain labels for each point in mesh. Use last trained model.
+    if kmeans:
+        Z = kmeans.predict(rgb_color_values)
+    else:
+        print xx.shape
+        Z = som.predict(rgb_color_values)
+
+    Z = Z.reshape(xx.shape)
+    plt.figure(1)
+    plt.clf()
+    plt.imshow(Z, interpolation='nearest',
+               extent=(xx.min(), xx.max(), yy.min(), yy.max()),
+               cmap=plt.cm.Paired,
+               aspect='auto', origin='lower')
+
+    # plt.plot(reduced_data[:, 0], reduced_data[:, 1], 'k.', markersize=2)
+    # # Plot the centroids as a white X
+    # if kmeans:
+    #     centroids = kmeans.cluster_centers_
+    # else:
+    #     centroids = np.reshape(som.weights, (som.weights.shape[0] * som.weights.shape[1], 2))
+    # plt.scatter(centroids[:, 0], centroids[:, 1],
+    #             marker='x', s=169, linewidths=3,
+    #             color='w', zorder=10)
+    # plt.title('K-means clustering on the digits dataset (PCA-reduced data)\n'
+    #           'Centroids are marked with white cross')
+    plt.xlim(x_min, x_max)
+    plt.ylim(y_min, y_max)
+    plt.xticks(())
+    plt.yticks(())
+    plt.show()
 
 
 def read_czi_file(file_name):

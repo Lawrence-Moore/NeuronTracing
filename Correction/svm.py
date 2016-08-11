@@ -19,35 +19,48 @@ def learn_color_quantization(image, color_map):
     # split up the color map into training and testing examples
     np.random.seed(0)
 
-    color_pixels = color_map.keys()
-    color_status = color_map.values() 
-    indices = np.random.permutation(len(color_pixels))
+    # get the indexes and values of the color map
+    pixel_colors = []
+    pixel_status = []
+    for intensity in range(color_map.shape[0]):
+        for x in range(color_map.shape[1]):
+            for y in range(color_map.shape[2]):
+                pixel_colors.append((intensity, x, y))
+                pixel_status.append(color_map[intensity, x, y])
+
+    indices = np.random.permutation(len(pixel_colors))
 
     # go through and generate features
-    features = generate_data(color_pixels, color_status, image)
+    features = generate_data(pixel_colors, pixel_status, image)
 
-    num_train = .80 * len(color_pixels)
+    num_train = .80 * len(features)
 
     x_train = features[indices[:num_train]]
-    y_train = color_status[indices[:num_train]]
+    y_train = pixel_status[indices[:num_train]]
 
     x_test = features[indices[num_train:]]
-    y_test = color_status[indices[num_train:]]
+    y_test = pixel_status[indices[num_train:]]
     svc.fit(x_train, y_train)
+    print svc.score(x_test, y_test)
 
 
-def generate_data(color_pixels, color_status, image):
-    data = []
+def generate_data(pixel_colors, pixel_status, image):
+    feature_one = []
+    feature_two = []
+    feature_three = []
     radius = 15  # number of pixels
-    for color, status in zip(color_pixels, color_status):
+    for color, status in zip(pixel_colors, pixel_status):
         color_features = []
         masked_image = generate_image_based_on_values(image, color, radius)
-        color_features.append(get_percentage_of_pixels_within_color_radius_feature(masked_image, color, radius))
-        color_features.append(get_length_of_lines_feature(masked_image, color, radius))
-        color_features.append(measure_increase_in_connectivity_with_radius_feature(masked_image, color, radius))
+        feature_one.append(get_percentage_of_pixels_within_color_radius_feature(masked_image, color, radius))
+        feature_two.append(get_length_of_lines_feature(masked_image, color))
+        feature_three.append(measure_increase_in_connectivity_with_radius_feature(image, color, radius))
 
+        
         datum = [color_features, status]
         data.append(datum)
+
+
 
     # save to text
     pickle.dump(data, open("data.txt", 'wb'))
@@ -77,11 +90,12 @@ def measure_increase_in_connectivity_with_radius_feature(image, color, starting_
     for multiplyer in range(10):
         radius = starting_radius + multiplyer * increment
         radii.append(radius)
-        lengths.append(get_length_of_lines_feature(image, color, radius))
+        masked_image = generate_image_based_on_values(image, color, radius)
+        lengths.append(get_length_of_lines_feature(masked_image, color))
     return stats.linregress(radii, lengths)[0]
 
 
-def get_length_of_lines_feature(image, color, radius):
+def get_length_of_lines_feature(image, color):
     # use a probablistic hough line algorithm to calculate the average length of the lines detected
     edges = canny(image)
     lines = probabilistic_hough_line(edges, threshold=10, line_length=10, line_gap=3)

@@ -1,6 +1,7 @@
 from math import sqrt
+import numpy as np
 
-from numpy import (array, unravel_index, nditer, linalg, random, subtract,
+from numpy import (array, unravel_index, ravel_multi_index, nditer, linalg, random, subtract,
                    power, exp, pi, zeros, arange, outer, meshgrid, dot, reshape)
 from collections import defaultdict
 from warnings import warn
@@ -45,11 +46,10 @@ class MiniSom(object):
         self.learning_rate = learning_rate
         self.sigma = sigma
         if weights is None:
-            self.weights = self.random_generator.rand(x, y, input_len) * 2 - 1  # random initialization
-            print self.weights.shape
+            self.weights = self.random_generator.rand(x, y, input_len)  # random initialization
         else:
             # assumes the weights are on a 0 to 1 scale
-            self.weights = weights * 2 - 1
+            self.weights = weights
         for i in range(x):
             for j in range(y):
                 self.weights[i, j] = self.weights[i, j] / fast_norm(self.weights[i, j])  # normalization
@@ -115,11 +115,24 @@ class MiniSom(object):
             q[i] = self.weights[self.winner(x)]
         return q
 
+    def predict(self, data):
+        """ same as quantization, except it returns which cluters it belong to instead of the weight itself """
+        q = zeros((data.shape[0]))
+        for i, x in enumerate(data):
+            q[i] = ravel_multi_index(self.winner(x), self.activation_map.shape)
+        return q
+
     def random_weights_init(self, data):
         """ Initializes the weights of the SOM picking random samples from data """
         it = nditer(self.activation_map, flags=['multi_index'])
         while not it.finished:
             self.weights[it.multi_index] = data[self.random_generator.randint(len(data))]
+
+            # make sure the weight isn't all zeros
+            while np.sum(self.weights[it.multi_index]) == 0:
+                self.weights[it.multi_index] = data[self.random_generator.randint(len(data))]
+
+            # make sure you don't divide by zero if the weights are all zero
             self.weights[it.multi_index] = self.weights[it.multi_index]/fast_norm(self.weights[it.multi_index])
             it.iternext()
 
