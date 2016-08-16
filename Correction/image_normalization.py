@@ -10,9 +10,6 @@ from math import sqrt
 from minisom import MiniSom
 import sys
 
-sys.path.append("../Masking")
-# from saving_and_color import xyv2rgb
-
 
 def normalize_with_standard_deviation(images, std_multiple):
     return normalize_colors(images, threshold_std=True, std_multiple=std_multiple)
@@ -413,7 +410,8 @@ def display_image(image):
     plt.show()
 
 
-def k_means(image=None, images=None, weights=None, n_colors=64, num_training=1000, std_multiple=0, threshold=False, show_plot=False):
+def k_means(image=None, images=None, weights=None, n_colors=64, num_training=1000, std_multiple=0,
+            threshold=False, show_plot=False, show_color_space_assignment=False):
     neuron_pixels, non_neuron_pixels, image_array, image = sample_data(image, images, std_multiple)
 
     if threshold:
@@ -434,8 +432,6 @@ def k_means(image=None, images=None, weights=None, n_colors=64, num_training=100
         kmeans = KMeans(n_clusters=n_colors, random_state=0).fit(image_array_sample)
 
     centers = kmeans.cluster_centers_
-
-    visualize_color_space(image_array_sample, n_colors, kmeans=True)
 
     if show_plot:
         # Get labels for all points
@@ -465,11 +461,15 @@ def k_means(image=None, images=None, weights=None, n_colors=64, num_training=100
         ax.set_title('After K-Means')
         plt.show()
 
+    if show_color_space_assignment:
+        for mid_v in [.1, .2, .4, .6, .8]:
+            visualize_color_space(kmeans=kmeans, mid_v=mid_v)
+
     return centers
 
 
 def self_organizing_map(image=None, images=None, weights=None, weights_max_value=1, n_colors=64,
-                        dim=None, num_training=1000, std_multiple=0, threshold=False, show_plot=False):
+                        dim=None, num_training=1000, std_multiple=0, threshold=False, show_plot=False, show_color_space_assignment=False):
     """
     Cluster an image using a self organizing map
     """
@@ -516,10 +516,8 @@ def self_organizing_map(image=None, images=None, weights=None, weights_max_value
     if threshold:
         # get mostly bright pixels with a bit of background
         som.train_random(neuron_pixels, num_training)
-        sample_array = shuffle(neuron_pixels, random_state=0)[:num_training]
     else:
         som.train_random(pixels, num_training)
-        sample_array = shuffle(pixels, random_state=0)[:num_training]
 
     if show_plot:
         qnt = som.quantization(pixels)  # quantize each pixels of the image
@@ -535,6 +533,10 @@ def self_organizing_map(image=None, images=None, weights=None, weights_max_value
         plt.imshow(clustered)
         ax.set_title('After SOM Clustering')
         plt.show()
+
+    if show_color_space_assignment:
+        for mid_v in [.1, .2, .4, .6, .8]:
+            visualize_color_space(som=som, mid_v=mid_v)
 
     return np.reshape(som.weights, (som.weights.shape[0] * som.weights.shape[1], 3))
 
@@ -604,14 +606,9 @@ def get_factor_closest_to_sqrt(number):
     return factor
 
 
-def visualize_color_space(data, n_clusters, kmeans=None, som=None):
-
-    if kmeans is not None:
-        kmeans = KMeans(n_clusters=n_clusters, random_state=0)
-        kmeans.fit(reduced_data)
-    else:
-        som = MiniSom(dim[0], dim[1], 2, sigma=0.1, learning_rate=0.2)
-        som.train_batch(reduced_data)
+def visualize_color_space(kmeans=None, som=None, mid_v=.6):
+    sys.path.append("../Masking")
+    from saving_and_color import xyv2rgb
 
     # Step size of the mesh. Decrease to increase the quality of the VQ.
     step = .5     # point in the mesh [x_min, m_max]x[y_min, y_max].
@@ -619,20 +616,19 @@ def visualize_color_space(data, n_clusters, kmeans=None, som=None):
     # make the grid for HSV
 
     # Plot the decision boundary. For that, we will assign a color to each
-    radius = 400
-    mid_v = 127
-    xx, yy = np.meshgrid(np.arange(0, radius, step), np.arange(0, radius, step))
+    radius = 100
+    xx, yy = np.meshgrid(np.arange(0, radius * 2, step), np.arange(0, radius * 2, step))
 
-    xyv = np.reshape(np.c_[xx.ravel(), yy.ravel(), np.ones(xx.shape).ravel() * mid_v], (xx.shape[0], xx.shape[1], 3)).astype(np.uint8)
+    xyv = np.reshape(np.c_[xx.ravel(), yy.ravel(), np.ones(xx.shape).astype(np.float32).ravel() * mid_v], (xx.shape[0], xx.shape[1], 3)).astype(np.float32)
 
-    rgb_color_values = xyv2rgb(xyv, radius, 'hsv')
+    rgb_color_values = xyv2rgb(xyv, radius, 'hsv').astype(np.float32) / 255
 
     # Obtain labels for each point in mesh. Use last trained model.
     if kmeans:
-        Z = kmeans.predict(rgb_color_values)
+        Z = kmeans.predict(np.reshape(rgb_color_values, (rgb_color_values.shape[0] * rgb_color_values.shape[1], 3)))
+        print Z
     else:
-        print xx.shape
-        Z = som.predict(rgb_color_values)
+        Z = som.predict(np.reshape(rgb_color_values, (rgb_color_values.shape[0] * rgb_color_values.shape[1], 3)))
 
     Z = Z.reshape(xx.shape)
     plt.figure(1)
@@ -653,8 +649,8 @@ def visualize_color_space(data, n_clusters, kmeans=None, som=None):
     #             color='w', zorder=10)
     # plt.title('K-means clustering on the digits dataset (PCA-reduced data)\n'
     #           'Centroids are marked with white cross')
-    plt.xlim(x_min, x_max)
-    plt.ylim(y_min, y_max)
+    plt.xlim(0, radius * 2)
+    plt.ylim(0, radius * 2)
     plt.xticks(())
     plt.yticks(())
     plt.show()
