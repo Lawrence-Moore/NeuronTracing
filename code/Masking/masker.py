@@ -9,10 +9,9 @@ import numpy as np
 from PIL import Image
 from saving_and_color import rgb2xyv, xyvLst2rgb, getStack
 import copy
-
-sys.path.append("../Correction")
-import minisom
-from image_normalization import k_means, self_organizing_map, display_image
+import os
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname('__file__'), '..')))
+from Algorithms.clustering import k_means, self_organizing_map
 
 #print af.info()
 sys.setrecursionlimit(50000)  # for packaging into OSX

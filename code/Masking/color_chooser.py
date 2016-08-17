@@ -4,12 +4,12 @@ import saving_and_color
 import numpy as np
 import time
 import copy
-import arrayfire as af
+# import arrayfire as af
 from PIL import Image
+import os
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname('__file__'), '..')))
+from Algorithms.clustering import k_means, self_organizing_map
 
-sys.path.append("../Correction")
-import minisom
-from image_normalization import k_means, self_organizing_map, display_image
 
 class ColorChooser(QtGui.QMainWindow):  # initiated in colorspace
     def __init__(self, mipImage, boundsInclude, rgbList, gpuMode, prefs, dir, grayscale, parent=None):

@@ -8,7 +8,7 @@ import os
 import math
 import re
 import time
-import arrayfire as af
+# import arrayfire as af
 import color_chooser
 
 
@@ -404,7 +404,7 @@ def xyv2rgb(xyv, radius, colorMode):
     else:
         if xyv.dtype != np.float32:
             xyv = xyv.astype(np.float32)
-        [x, y, v] = np.split(xyv, 3, axis=2)
+        [x, y, v] = xyv[:, :, 0], xyv[:, :, 1], xyv[:, :, 2]
     if colorMode == 'hsvI':
         dx = 1 - x / radius
         dy = y / radius - 1

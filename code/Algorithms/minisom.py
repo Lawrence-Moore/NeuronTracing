@@ -1,7 +1,7 @@
 from math import sqrt
 import numpy as np
 
-from numpy import (array, unravel_index, ravel_multi_index, nditer, linalg, random, subtract,
+from numpy import (unravel_index, ravel_multi_index, nditer, random, subtract,
                    power, exp, pi, zeros, arange, outer, meshgrid, dot, reshape)
 from collections import defaultdict
 from warnings import warn

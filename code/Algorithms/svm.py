@@ -1,10 +1,7 @@
 import numpy as np
-from skimage.transform import (hough_line, hough_line_peaks,
-                               probabilistic_hough_line)
+from skimage.transform import probabilistic_hough_line
 from skimage.feature import canny
-import matplotlib.pyplot as plt
 from sklearn import svm
-from skimage.color import rgb2gray
 from math import sqrt
 from scipy import stats
 import pickle
@@ -48,19 +45,17 @@ def generate_data(pixel_colors, pixel_status, image):
     feature_one = []
     feature_two = []
     feature_three = []
+    data = []
     radius = 15  # number of pixels
-    for color, status in zip(pixel_colors, pixel_status):
-        color_features = []
+    for color in pixel_colors:
         masked_image = generate_image_based_on_values(image, color, radius)
         feature_one.append(get_percentage_of_pixels_within_color_radius_feature(masked_image, color, radius))
         feature_two.append(get_length_of_lines_feature(masked_image, color))
         feature_three.append(measure_increase_in_connectivity_with_radius_feature(image, color, radius))
 
-        
-        datum = [color_features, status]
-        data.append(datum)
-
-
+    """
+    TODO: Make all features on a 0-1 scale
+    """
 
     # save to text
     pickle.dump(data, open("data.txt", 'wb'))
@@ -68,6 +63,9 @@ def generate_data(pixel_colors, pixel_status, image):
 
 
 def generate_image_based_on_values(image, color, radius):
+    """
+    Mask away pixels that aren't within the specified radius of the color within the image
+    """
     red_mask = np.logical_and(image[:, :, 0] > color[0] - radius, image[:, :, 0] < color[0] + radius)
     green_mask = np.logical_and(image[:, :, 1] > color[1] - radius, image[:, :, 1] < color[1] + radius)
     blue_mask = np.logical_and(image[:, :, 2] > color[2] - radius, image[:, :, 2] < color[2] + radius)

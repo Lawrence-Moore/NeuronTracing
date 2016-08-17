@@ -1,9 +1,10 @@
 from PyQt4 import QtGui, QtCore
 import sys
-from image_normalization import read_czi_file
 import numpy as np
 import os
 import tifffile
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname('__file__'), '..')))
+from Algorithms.helper_functions import read_czi_file
 
 app = QtGui.QApplication(sys.argv)
 dialog = QtGui.QFileDialog()

@@ -1,11 +1,15 @@
 from PyQt4 import QtGui, QtCore
 import sys
 from correction import Ui_CorrectionWindow
-from image_normalization import *
 from PIL import Image, ImageQt
 import numpy as np
 import os
 import tifffile
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname('__file__'), '..')))
+from Algorithms.image_normalization import normalize_with_standard_deviation, normalize_generic
+from Algorithms.helper_functions import read_czi_file, generate_mip, save_image
+from Algorithms.alignment import align_images
+
 
 # Docstring Format:
 # Param ArgName: (ArgType:) Description
@@ -14,6 +18,7 @@ import tifffile
 
 # Comments precede what they describe unless on same line or continuing.
 # Variable description often as "type: description"
+
 
 class Correction(QtGui.QMainWindow):
     def __init__(self):
@@ -205,7 +210,7 @@ class Correction(QtGui.QMainWindow):
         '''
         separatedColors = []
         for channel in xrange(0, 3):  # for R, G, and B channels
-             # set other two channels to same value
+            # set other two channels to same value
             newarr = arr.copy()
             extraChannel = (channel + 1) % 3
             newarr[:, :, extraChannel] = newarr[:, :, channel]
@@ -462,7 +467,7 @@ class Correction(QtGui.QMainWindow):
             currentProgress += 4
             bar.setValue(currentProgress)
             QtGui.QApplication.processEvents()
-        self.unalignedImages.append(originalLayers) # unalignedImages[0]
+        self.unalignedImages.append(originalLayers)  # unalignedImages[0]
         self.drawBeforeView()  # push the original image to beforeView
         bar.setWindowTitle(QtCore.QString('Importing File...Normalizing Original Data'))
         QtGui.QApplication.processEvents()
@@ -627,4 +632,3 @@ if __name__ == '__main__':
     ex = Correction()
     ex.show()
     sys.exit(app.exec_())
-
