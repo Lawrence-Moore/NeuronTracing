@@ -77,7 +77,7 @@ Parameters:
 The code is well documented. The only thing that might appear unclear is the way the pixels are selected, which is addressed in the sampling data section below.
 
 ## Self Organizing Map
-The core implementation of the SOM is from this [repo](https://github.com/JustGlowing/minisom). I used this instead of my own because mine was slower and supported less operations. I did add a few methods, such as the ability to pass in weights, train in batch, and the ability to return the specific index of the winning neuron. The code (with changes) is in code/Algorithms.minisom.py.
+The core implementation of the SOM is from this [repo](https://github.com/JustGlowing/minisom). I added a few methods, such as the ability to pass in weights, train in batch, and the ability to return the specific index of the winning neuron. The code (with changes) is in code/Algorithms.minisom.py.
 
 Things to note: 
 - weights are stored in a MxNx3 format, where MxN is the layout of the nodes.
@@ -100,7 +100,7 @@ In clustering.py, the function visualize_color_space allows the user to see how 
 
 ## SVM
 
-The SVM is currently unfinished. The methods to extract features work. All that needs to be done is a bit of preprocessing on the data so that every feature has a mean of 0 and standard deviation of 1. Further, quality training data needs to be generated and then the SVM can be trained. 
+The overall pipeline using SVM is currently somewhat unfinished. The methods to extract features work. All that needs to be done is a bit of preprocessing on the data so that every feature has a mean of 0 and standard deviation of 1. Further, quality training data needs to be generated and then the SVM can be trained. 
 
 It's worth noting that the SVM is a binary classifier, simply stating whether a color is present or not in the image. This means that separating the image into discrete colors won't be immediately possible, as the algorithm isn't selecting color regions per sé but just color pixels that should be present. Something to fool around with in the future though.
 
